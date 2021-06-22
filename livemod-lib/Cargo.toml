@@ -1,0 +1,9 @@
+[package]
+name = "livemod"
+version = "0.1.0"
+edition = "2018"
+
+[dependencies]
+parking_lot = "0.11"
+nanoserde = "0.1"
+base64 = "0.13"

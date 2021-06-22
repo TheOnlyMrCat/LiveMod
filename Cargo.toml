@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "livemod-lib",
+    "livemod-test",
+    "livemod-gui",
+]

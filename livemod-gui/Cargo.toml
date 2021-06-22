@@ -1,0 +1,12 @@
+[package]
+name = "livemod-gui"
+version = "0.1.0"
+edition = "2018"
+
+[dependencies]
+egui = "0.12.0"
+egui_glium = "0.12.0"
+glium = "0.29.1"
+base64 = "0.13"
+nanoserde = "0.1"
+livemod = { path = "../livemod-lib" }

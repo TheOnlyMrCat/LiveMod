@@ -1,0 +1,10 @@
+#- b!
+cargo build --package livemod-gui
+cargo build --package livemod-test
+#/
+
+#-
+PATH="$PATH:$PWD/target/debug"
+cargo build --package livemod-gui
+cargo run --package livemod-test
+#/
