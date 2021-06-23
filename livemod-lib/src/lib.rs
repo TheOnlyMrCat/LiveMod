@@ -1,5 +1,8 @@
 //! # livemod
 
+#[cfg(feature = "livemod-derive")]
+pub use livemod_derive::LiveMod;
+
 use std::any::Any;
 use std::cell::UnsafeCell;
 use std::collections::HashMap;

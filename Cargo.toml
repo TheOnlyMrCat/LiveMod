@@ -3,4 +3,5 @@ members = [
     "livemod-lib",
     "livemod-test",
     "livemod-gui",
+    "livemod-derive",
 ]

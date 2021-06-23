@@ -1,8 +1,8 @@
-use livemod::{LiveMod, LiveModHandle, ModVar, StructData, StructDataType, StructDataValue};
+use livemod::{LiveMod, LiveModHandle, ModVar, StructDataType, StructDataValue};
 
 fn main() {
     let livemod = LiveModHandle::new_gui();
-    
+
     static DATA: ModVar<Data> = ModVar::new(Data { value: 0 });
     livemod.track_variable(DATA.get_handle());
 
@@ -37,4 +37,10 @@ impl LiveMod for Data {
     fn set_self(&mut self, value: StructDataValue) {
         self.value = *value.as_unsigned_int().unwrap() as u32;
     }
+}
+
+#[derive(LiveMod)]
+struct DerivedData {
+    value_1: u32,
+    value_2: i64,
 }

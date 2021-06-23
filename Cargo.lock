@@ -677,8 +677,17 @@ name = "livemod"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "livemod-derive",
  "nanoserde",
  "parking_lot",
+]
+
+[[package]]
+name = "livemod-derive"
+version = "0.1.0"
+dependencies = [
+ "quote",
+ "syn",
 ]
 
 [[package]]
