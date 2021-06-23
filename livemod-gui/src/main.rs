@@ -1,9 +1,9 @@
-use std::io::{BufRead, BufReader};
 use std::collections::HashMap;
+use std::io::{BufRead, BufReader};
 use std::sync::mpsc::{self, Sender};
 
 use glium::glutin;
-use livemod::{StructData, StructDataValue};
+use livemod::{StructData, StructDataType, StructDataValue};
 use nanoserde::{DeBin, SerBin};
 
 fn create_display(event_loop: &glutin::event_loop::EventLoop<()>) -> glium::Display {
@@ -42,8 +42,8 @@ fn main() {
         glutin::event::Event::MainEventsCleared => {
             while let Ok(msg) = recv.try_recv() {
                 match msg {
-                    Message::NewData(s) => {
-                        current_variables.insert(s.name.clone(), s);
+                    Message::NewData(name, data) => {
+                        current_variables.insert(name, data);
                     }
                 }
             }
@@ -55,13 +55,22 @@ fn main() {
                     .striped(true)
                     .spacing([40.0, 4.0])
                     .show(ui, |ui| {
-                        recursive_ui(ui, &mut values, &mut modified_variables, current_variables.values(), String::new())
+                        recursive_ui(
+                            ui,
+                            &mut values,
+                            &mut modified_variables,
+                            current_variables.iter().map(|(s, v)| (s.clone(), v)),
+                            String::new(),
+                        )
                     });
             });
 
             for (name, value) in modified_variables.drain() {
                 print!("s{}=", name);
-                println!("{}", base64::encode_config(value.serialize_bin(), base64::STANDARD_NO_PAD));
+                println!(
+                    "{}",
+                    base64::encode_config(value.serialize_bin(), base64::STANDARD_NO_PAD)
+                );
             }
 
             let (needs_repaint, shapes) = egui.end_frame(&display);
@@ -108,27 +117,37 @@ struct Values {
 }
 
 enum Message {
-    NewData(StructData),
+    NewData(String, StructDataType),
 }
 
 fn recursive_ui<'a>(
     ui: &mut egui::Ui,
     values: &mut Values,
     modified_variables: &mut HashMap<String, StructDataValue>,
-    variables: impl Iterator<Item = &'a StructData>,
+    variables: impl Iterator<Item = (String, &'a StructDataType)>,
     namespace: String,
 ) {
-    for var in variables {
-        ui.label(var.name.clone());
-        let namespaced_name = format!("{}:{}", namespace, var.name);
-        match &var.data_type {
+    for (name, var) in variables {
+        ui.label(name.clone());
+        let namespaced_name = format!("{}:{}", namespace, name);
+        match &var {
             livemod::StructDataType::Struct { name, fields } => {
                 ui.collapsing(name, |ui| {
                     egui::Grid::new(format!("{}_grid", &namespaced_name))
                         .striped(true)
                         .spacing([40.0, 4.0])
                         .show(ui, |ui| {
-                            recursive_ui(ui, values, modified_variables, fields.iter(), namespaced_name)
+                            recursive_ui(
+                                ui,
+                                values,
+                                modified_variables,
+                                fields
+                                    .iter()
+                                    .map(|field| (field.name.clone(), &field.data_type))
+                                    .collect::<Vec<_>>()
+                                    .into_iter(),
+                                namespaced_name,
+                            )
                         });
                 });
             }
@@ -141,17 +160,21 @@ fn recursive_ui<'a>(
                 ui.add(
                     egui::Slider::from_get_set(
                         (*suggested_min) as f64..=(*suggested_max) as f64,
-                        |val| {
-                            *match val {
-                                Some(val) => {
-                                    values.i64.insert(namespaced_name.clone(), (val as i64).clamp(*storage_min, *storage_max));
-                                    let v = values.i64.get(&namespaced_name).unwrap();
-                                    modified_variables.insert(namespaced_name.clone(), livemod::StructDataValue::SignedInt(*v));
-                                    v
-                                }
-                                None => values.i64.entry(namespaced_name.clone()).or_default(),
-                            } as f64
-                        },
+                        |val| *match val {
+                            Some(val) => {
+                                values.i64.insert(
+                                    namespaced_name.clone(),
+                                    (val as i64).clamp(*storage_min, *storage_max),
+                                );
+                                let v = values.i64.get(&namespaced_name).unwrap();
+                                modified_variables.insert(
+                                    namespaced_name.clone(),
+                                    livemod::StructDataValue::SignedInt(*v),
+                                );
+                                v
+                            }
+                            None => values.i64.entry(namespaced_name.clone()).or_default(),
+                        } as f64,
                     )
                     .integer(),
                 );
@@ -165,17 +188,21 @@ fn recursive_ui<'a>(
                 ui.add(
                     egui::Slider::from_get_set(
                         (*suggested_min) as f64..=(*suggested_max) as f64,
-                        |val| {
-                            *match val {
-                                Some(val) => {
-                                    values.u64.insert(namespaced_name.clone(), (val as u64).clamp(*storage_min, *storage_max));
-                                    let v = values.u64.get(&namespaced_name).unwrap();
-                                    modified_variables.insert(namespaced_name.clone(), livemod::StructDataValue::UnsignedInt(*v));
-                                    v
-                                }
-                                None => values.u64.entry(namespaced_name.clone()).or_default(),
-                            } as f64
-                        },
+                        |val| *match val {
+                            Some(val) => {
+                                values.u64.insert(
+                                    namespaced_name.clone(),
+                                    (val as u64).clamp(*storage_min, *storage_max),
+                                );
+                                let v = values.u64.get(&namespaced_name).unwrap();
+                                modified_variables.insert(
+                                    namespaced_name.clone(),
+                                    livemod::StructDataValue::UnsignedInt(*v),
+                                );
+                                v
+                            }
+                            None => values.u64.entry(namespaced_name.clone()).or_default(),
+                        } as f64,
                     )
                     .integer(),
                 );
@@ -193,10 +220,13 @@ fn reader_thread(sender: Sender<Message>) {
             b'\0' => break,
             b'n' => {
                 // New variable to track
+                let (name, data) =
+                    line[1..].split_at(line[1..].iter().position(|&c| c == b';').unwrap());
                 sender
                     .send(Message::NewData(
-                        StructData::deserialize_bin(
-                            &base64::decode_config(&line[1..], base64::STANDARD_NO_PAD).unwrap(),
+                        String::from_utf8(name.to_owned()).unwrap(),
+                        StructDataType::deserialize_bin(
+                            &base64::decode_config(&data[1..], base64::STANDARD_NO_PAD).unwrap(),
                         )
                         .unwrap(),
                     ))

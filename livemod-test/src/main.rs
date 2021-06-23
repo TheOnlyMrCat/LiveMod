@@ -1,4 +1,4 @@
-use livemod::{LiveModData, LiveModHandle, ModVar, StructData, StructDataValue};
+use livemod::{LiveMod, LiveModHandle, ModVar, StructData, StructDataType, StructDataValue};
 
 fn main() {
     let livemod = LiveModHandle::new_gui();
@@ -20,25 +20,21 @@ struct Data {
     value: u32,
 }
 
-impl LiveModData for Data {
-    fn get_data_types(&self) -> StructData {
-        StructData {
-            name: "value".to_owned(),
-            data_type: livemod::StructDataType::UnsignedSlider {
-                storage_min: u32::MIN as u64,
-                storage_max: u32::MAX as u64,
-                suggested_min: 1,
-                suggested_max: 100,
-            },
+impl LiveMod for Data {
+    fn data_type(&self) -> StructDataType {
+        livemod::StructDataType::UnsignedSlider {
+            storage_min: u32::MIN as u64,
+            storage_max: u32::MAX as u64,
+            suggested_min: 1,
+            suggested_max: 100,
         }
     }
 
-    fn set_by_name(&mut self, name: &str, value: StructDataValue) {
-        match name {
-            "value" => {
-                self.value = *value.as_unsigned_int().unwrap() as u32;
-            }
-            _ => panic!(),
-        }
+    fn get_named_value(&mut self, name: &str) -> &mut dyn LiveMod {
+        unimplemented!()
+    }
+
+    fn set_self(&mut self, value: StructDataValue) {
+        self.value = *value.as_unsigned_int().unwrap() as u32;
     }
 }

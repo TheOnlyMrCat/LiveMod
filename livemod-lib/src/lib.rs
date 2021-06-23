@@ -74,9 +74,10 @@ impl LiveModHandle {
     }
 }
 
-pub trait LiveModData {
-    fn get_data_types(&self) -> StructData;
-    fn set_by_name(&mut self, name: &str, value: StructDataValue);
+pub trait LiveMod {
+    fn data_type(&self) -> StructDataType;
+    fn get_named_value(&mut self, name: &str) -> &mut dyn LiveMod;
+    fn set_self(&mut self, value: StructDataValue);
 }
 
 #[derive(SerBin, DeBin)]
@@ -132,7 +133,7 @@ impl StructDataValue {
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct ModVarHandle {
-    var: &'static UnsafeCell<dyn LiveModData>,
+    var: &'static UnsafeCell<dyn LiveMod>,
 }
 
 unsafe impl Send for ModVarHandle {}
@@ -151,7 +152,7 @@ impl<T> ModVar<T> {
     }
 }
 
-impl<T: LiveModData> ModVar<T> {
+impl<T: LiveMod> ModVar<T> {
     pub fn get_handle(&'static self) -> ModVarHandle {
         ModVarHandle { var: &self.cell }
     }
@@ -186,14 +187,15 @@ fn input_thread(
     loop {
         match recv.try_recv() {
             Ok(handle) => {
-                let data_types = unsafe { (*handle.var.get()).get_data_types() };
+                let data_type = unsafe { (*handle.var.get()).data_type() };
                 writeln!(
                     input,
-                    "n{}",
-                    base64::encode_config(data_types.serialize_bin(), base64::STANDARD_NO_PAD)
+                    "n{};{}",
+                    "value",
+                    base64::encode_config(data_type.serialize_bin(), base64::STANDARD_NO_PAD)
                 )
                 .unwrap();
-                variables.write().insert(data_types.name.to_owned(), handle);
+                variables.write().insert("value".to_owned(), handle);
             }
             Err(mpsc::TryRecvError::Empty) => {}
             Err(mpsc::TryRecvError::Disconnected) => {
@@ -219,22 +221,27 @@ fn output_thread(output: ChildStdout, variables: Arc<RwLock<HashMap<String, ModV
             }
             b's' => {
                 // Data is to be changed
-                let base = String::from_utf8(
-                    line[2..] // Not [1..], because the first character of the name will be ':'
-                        .split(|&b| b == b':' || b == b'=')
-                        .next()
-                        .unwrap()
-                        .to_owned(),
-                )
-                .unwrap();
-                let var_handle = *variables.read().get(&base).unwrap();
-                //TODO: Fuller resolution of names
-                unsafe { &mut *var_handle.var.get() }.set_by_name(
-                    &base,
-                    StructDataValue::deserialize_bin(&base64::decode_config(
-                        line[line.iter().position(|&b| b == b'=').unwrap() + 1..].to_owned(),
-                        base64::STANDARD_NO_PAD,
-                    ).unwrap()).unwrap(),
+                let namespaced_name = line[2..] // Not [1..], because the first character of the name will be ':'
+                    .split(|&b| b == b':' || b == b'=')
+                    .collect::<Vec<_>>();
+                let base = std::str::from_utf8(namespaced_name.first().unwrap()).unwrap();
+                let mut var_handle =
+                    unsafe { &mut *(*variables.read().get(base).unwrap()).var.get() };
+                if namespaced_name.len() > 2 {
+                    for name in &namespaced_name[1..namespaced_name.len()-2] {
+                        let name = std::str::from_utf8(name).unwrap();
+                        var_handle = var_handle.get_named_value(name);
+                    }
+                }
+                var_handle.set_self(
+                    StructDataValue::deserialize_bin(
+                        &base64::decode_config(
+                            line[line.iter().position(|&b| b == b'=').unwrap() + 1..].to_owned(),
+                            base64::STANDARD_NO_PAD,
+                        )
+                        .unwrap(),
+                    )
+                    .unwrap(),
                 )
             }
             _ => {
