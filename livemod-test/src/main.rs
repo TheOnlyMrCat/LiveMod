@@ -1,21 +1,22 @@
-use livemod::{LiveMod, LiveModHandle, ModVar, StructDataType, StructDataValue};
+use livemod::{LiveMod, LiveModHandle, StructDataType, StructDataValue};
 
 fn main() {
     let livemod = LiveModHandle::new_gui();
 
-    static DATA: ModVar<Data> = ModVar::new(Data { value: 0 });
-    livemod.track_variable(DATA.get_handle());
+    let data = livemod.create_variable("Non-derived", Data::default());
 
-    println!("Value: {}", DATA.value);
-    let mut prev_data = DATA.value;
+    let mut prev_data = data.lock().value;
+    println!("Non-derived: {}", prev_data);
     loop {
-        if DATA.value != prev_data {
-            println!("Changed: {}", DATA.value);
-            prev_data = DATA.value;
+        let cur_value = data.lock().value;
+        if cur_value != prev_data {
+            println!("Non-derived: {}", cur_value);
+            prev_data = cur_value;
         }
     }
 }
 
+#[derive(Default)]
 struct Data {
     value: u32,
 }
@@ -30,7 +31,7 @@ impl LiveMod for Data {
         }
     }
 
-    fn get_named_value(&mut self, name: &str) -> &mut dyn LiveMod {
+    fn get_named_value(&mut self, _: &str) -> &mut dyn LiveMod {
         unimplemented!()
     }
 
@@ -39,7 +40,7 @@ impl LiveMod for Data {
     }
 }
 
-#[derive(LiveMod)]
+// #[derive(Default, LiveMod)]
 struct DerivedData {
     value_1: u32,
     value_2: i64,
