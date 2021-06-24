@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
+use std::ops::{Deref, DerefMut};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::Arc;
 
-use parking_lot::{Mutex, MutexGuard, RwLock};
 use nanoserde::{DeBin, SerBin};
+use parking_lot::{Mutex, MutexGuard, RwLock};
 
 use crate::{LiveMod, TrackedDataValue};
 
@@ -23,7 +24,7 @@ impl LiveModHandle {
     }
 
     /// Initialise livemod with an external user interface, for which the specified command will be run.
-    pub fn new_with_ui<'a>(command: &str) -> LiveModHandle {
+    pub fn new_with_ui(command: &str) -> LiveModHandle {
         let mut child = Command::new(command)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -74,19 +75,13 @@ impl LiveModHandle {
         let var_handle = ModVarHandle {
             var: &*mod_var.value as *const _,
         };
-        self.sender.send(Message::NewVariable(name.to_owned(), var_handle)).unwrap();
+        self.sender
+            .send(Message::NewVariable(name.to_owned(), var_handle))
+            .unwrap();
         //TODO: Duplicate name prevention
         mod_var
     }
 }
-
-#[derive(Clone, Copy)]
-struct ModVarHandle {
-    var: *const Mutex<dyn LiveMod>,
-}
-
-unsafe impl Send for ModVarHandle {}
-unsafe impl Sync for ModVarHandle {}
 
 /// A variable tracked by an external livemod viewer
 ///
@@ -98,8 +93,13 @@ pub struct ModVar<T> {
 }
 
 impl<T> ModVar<T> {
-    pub fn lock(&self) -> MutexGuard<T> {
-        self.value.lock()
+    pub fn lock(&self) -> ModVarGuard<T> {
+        ModVarGuard(self.value.lock())
+    }
+
+    pub fn lock_mut(&mut self) -> ModVarMutGuard<T> {
+        ModVarMutGuard(self.value.lock())
+        //TODO: Update value in GUI
     }
 }
 
@@ -109,8 +109,42 @@ impl<T> Drop for ModVar<T> {
     }
 }
 
+pub struct ModVarGuard<'a, T>(MutexGuard<'a, T>);
+
+impl<'a, T> Deref for ModVarGuard<'a, T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &*self.0
+    }
+}
+
+pub struct ModVarMutGuard<'a, T>(MutexGuard<'a, T>);
+
+impl<'a, T> Deref for ModVarMutGuard<'a, T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &*self.0
+    }
+}
+
+impl<'a, T> DerefMut for ModVarMutGuard<'a, T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut *self.0
+    }
+}
+
+#[derive(Clone, Copy)]
+struct ModVarHandle {
+    var: *const Mutex<dyn LiveMod>,
+}
+
+unsafe impl Send for ModVarHandle {}
+unsafe impl Sync for ModVarHandle {}
+
 enum Message {
-    NewVariable(String, ModVarHandle)
+    NewVariable(String, ModVarHandle),
 }
 
 struct ChildDropper {
@@ -129,24 +163,21 @@ fn input_thread(
     variables: Arc<RwLock<HashMap<String, ModVarHandle>>>,
 ) {
     loop {
-        match recv.try_recv() {
-            Ok(message) => {
-                match message {
-                    Message::NewVariable(name, handle) => {
-                        let data_type = unsafe { (*handle.var).lock() }.data_type();
-                        writeln!(
-                            input,
-                            "n{};{}",
-                            &name,
-                            base64::encode_config(data_type.serialize_bin(), base64::STANDARD_NO_PAD)
-                        )
-                        .unwrap();
-                        variables.write().insert(name, handle);
-                    }
+        match recv.recv() {
+            Ok(message) => match message {
+                Message::NewVariable(name, handle) => {
+                    let data_type = unsafe { (*handle.var).lock() }.data_type();
+                    writeln!(
+                        input,
+                        "n{};{}",
+                        &name,
+                        base64::encode_config(data_type.serialize_bin(), base64::STANDARD_NO_PAD)
+                    )
+                    .unwrap();
+                    variables.write().insert(name, handle);
                 }
-            }
-            Err(mpsc::TryRecvError::Empty) => {}
-            Err(mpsc::TryRecvError::Disconnected) => {
+            },
+            Err(mpsc::RecvError) => {
                 // The LiveModHandle which spawned this thread has
                 // been destroyed, so quit and clean up now.
                 break;
@@ -176,7 +207,7 @@ fn output_thread(output: ChildStdout, variables: Arc<RwLock<HashMap<String, ModV
                 let mut var_handle =
                     unsafe { &mut *(*variables.read().get(base).unwrap().var).lock() };
                 if namespaced_name.len() > 2 {
-                    for name in &namespaced_name[1..=namespaced_name.len()-2] {
+                    for name in &namespaced_name[1..=namespaced_name.len() - 2] {
                         let name = std::str::from_utf8(name).unwrap();
                         var_handle = var_handle.get_named_value(name);
                     }

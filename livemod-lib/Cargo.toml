@@ -5,6 +5,7 @@ edition = "2018"
 
 [features]
 derive = ["livemod-derive"]
+disabled = []
 
 [dependencies]
 parking_lot = "0.11"

@@ -3,7 +3,9 @@
 #[cfg(feature = "livemod-derive")]
 pub use livemod_derive::LiveMod;
 
+#[cfg_attr(feature = "disabled", allow(dead_code))]
 mod enabled;
+#[cfg_attr(not(feature = "disabled"), allow(dead_code))]
 mod disabled;
 
 #[cfg(not(feature = "disabled"))]
