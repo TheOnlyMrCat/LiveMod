@@ -3,15 +3,23 @@ use livemod::{LiveMod, LiveModHandle, StructDataType, StructDataValue};
 fn main() {
     let livemod = LiveModHandle::new_gui();
 
-    let data = livemod.create_variable("Non-derived", Data::default());
+    let nonderived = livemod.create_variable("Non-derived", Data::default());
+    let derived = livemod.create_variable("Derived", DerivedData::default());
 
-    let mut prev_data = data.lock().value;
-    println!("Non-derived: {}", prev_data);
+    let mut prev_nonderived = nonderived.lock().value;
+    let mut prev_derived = *derived.lock();
+    println!("Non-derived: {}", prev_nonderived);
+    println!("Derived: {:?}", prev_derived);
     loop {
-        let cur_value = data.lock().value;
-        if cur_value != prev_data {
-            println!("Non-derived: {}", cur_value);
-            prev_data = cur_value;
+        let cur_nonderived = nonderived.lock().value;
+        let cur_derived = *derived.lock();
+        if cur_nonderived != prev_nonderived {
+            println!("Non-derived: {}", cur_nonderived);
+            prev_nonderived = cur_nonderived;
+        }
+        if cur_derived != prev_derived {
+            println!("Derived: {:?}", cur_derived);
+            prev_derived = cur_derived;
         }
     }
 }
@@ -40,7 +48,7 @@ impl LiveMod for Data {
     }
 }
 
-// #[derive(Default, LiveMod)]
+#[derive(Default, Debug, LiveMod, PartialEq, Clone, Copy)]
 struct DerivedData {
     value_1: u32,
     value_2: i64,

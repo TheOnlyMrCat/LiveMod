@@ -14,12 +14,6 @@ pub use disabled::*;
 
 use nanoserde::{DeBin, SerBin};
 
-pub trait LiveMod {
-    fn data_type(&self) -> StructDataType;
-    fn get_named_value(&mut self, name: &str) -> &mut dyn LiveMod;
-    fn set_self(&mut self, value: StructDataValue);
-}
-
 #[derive(SerBin, DeBin)]
 pub struct StructData {
     pub name: String,
@@ -39,6 +33,14 @@ pub enum StructDataType {
         storage_max: u64,
         suggested_min: u64,
         suggested_max: u64,
+    },
+    SignedInteger {
+        min: i64,
+        max: i64,
+    },
+    UnsignedInteger {
+        min: u64,
+        max: u64,
     },
     Struct {
         name: String,
@@ -70,3 +72,63 @@ impl StructDataValue {
     }
 }
 
+pub trait LiveMod {
+    fn data_type(&self) -> StructDataType;
+    fn get_named_value(&mut self, name: &str) -> &mut dyn LiveMod;
+    fn set_self(&mut self, value: StructDataValue);
+}
+
+macro_rules! unsigned_primitive_impl {
+    ($($ty:ident),*) => {
+        $(
+        impl LiveMod for $ty {
+            fn data_type(&self) -> StructDataType {
+                StructDataType::UnsignedInteger {
+                    min: $ty::MIN as u64,
+                    max: $ty::MAX as u64,
+                }
+            }
+
+            fn get_named_value(&mut self, _: &str) -> &mut dyn LiveMod {
+                unimplemented!()
+            }
+
+            fn set_self(&mut self, value: StructDataValue) {
+                match value {
+                    StructDataValue::UnsignedInt(val) => *self = val as $ty,
+                    _ => unimplemented!(),
+                }
+            }
+        }
+        )*
+    }
+}
+
+macro_rules! signed_primitive_impl {
+    ($($ty:ident),*) => {
+        $(
+        impl LiveMod for $ty {
+            fn data_type(&self) -> StructDataType {
+                StructDataType::SignedInteger {
+                    min: $ty::MIN as i64,
+                    max: $ty::MAX as i64,
+                }
+            }
+
+            fn get_named_value(&mut self, _: &str) -> &mut dyn LiveMod {
+                unimplemented!()
+            }
+
+            fn set_self(&mut self, value: StructDataValue) {
+                match value {
+                    StructDataValue::SignedInt(val) => *self = val as $ty,
+                    _ => unimplemented!(),
+                }
+            }
+        }
+        )*
+    }
+}
+
+unsigned_primitive_impl!(u8, u16, u32, u64, usize);
+signed_primitive_impl!(i8, i16, i32, i64, isize);

@@ -27,7 +27,7 @@ pub fn livemod_derive(input: TokenStream) -> TokenStream {
                                     quote! {
                                         ::livemod::StructData {
                                             name: String::from(#name),
-                                            data_type: ::livemod::LiveMod::data_type(self.#ident)
+                                            data_type: ::livemod::LiveMod::data_type(&self.#ident)
                                         }
                                     },
                                     quote! {
@@ -53,12 +53,12 @@ pub fn livemod_derive(input: TokenStream) -> TokenStream {
                             fn get_named_value(&mut self, name: &str) -> &mut ::livemod::LiveMod {
                                 match name {
                                     #(#matches ,)*
-                                    _ => unimplemented!(),
+                                    _ => panic!("Unexpected value name!"),
                                 }
                             }
 
                             fn set_self(&mut self, value: ::livemod::StructDataValue) {
-                                unimplemented!()
+                                panic!("Unexpected set operation!")
                             }
                         }
                     };

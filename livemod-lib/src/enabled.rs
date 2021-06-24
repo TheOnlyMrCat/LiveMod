@@ -175,7 +175,7 @@ fn output_thread(output: ChildStdout, variables: Arc<RwLock<HashMap<String, ModV
                 let mut var_handle =
                     unsafe { &mut *(*variables.read().get(base).unwrap().var).lock() };
                 if namespaced_name.len() > 2 {
-                    for name in &namespaced_name[1..namespaced_name.len()-2] {
+                    for name in &namespaced_name[1..=namespaced_name.len()-2] {
                         let name = std::str::from_utf8(name).unwrap();
                         var_handle = var_handle.get_named_value(name);
                     }

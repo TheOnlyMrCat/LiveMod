@@ -207,6 +207,42 @@ fn recursive_ui<'a>(
                     .integer(),
                 );
             }
+            StructDataType::SignedInteger { min, max } => {
+                if ui
+                    .add(
+                        egui::DragValue::new(
+                            values.i64.entry(namespaced_name.clone()).or_default(),
+                        )
+                        .clamp_range(*min..=*max),
+                    )
+                    .changed()
+                {
+                    modified_variables.insert(
+                        namespaced_name.clone(),
+                        livemod::StructDataValue::SignedInt(
+                            *values.i64.entry(namespaced_name.clone()).or_default(),
+                        ),
+                    );
+                }
+            }
+            StructDataType::UnsignedInteger { min, max } => {
+                if ui
+                    .add(
+                        egui::DragValue::new(
+                            values.u64.entry(namespaced_name.clone()).or_default(),
+                        )
+                        .clamp_range(*min..=*max),
+                    )
+                    .changed()
+                {
+                    modified_variables.insert(
+                        namespaced_name.clone(),
+                        livemod::StructDataValue::UnsignedInt(
+                            *values.u64.entry(namespaced_name.clone()).or_default(),
+                        ),
+                    );
+                }
+            }
         }
         ui.end_row();
     }
