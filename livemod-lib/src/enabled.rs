@@ -7,8 +7,9 @@ use std::sync::Arc;
 use parking_lot::{Mutex, MutexGuard, RwLock};
 use nanoserde::{DeBin, SerBin};
 
-use crate::{LiveMod, StructDataValue};
+use crate::{LiveMod, TrackedDataValue};
 
+/// A handle to an external livemod viewer.
 #[derive(Clone)]
 pub struct LiveModHandle {
     sender: SyncSender<Message>,
@@ -19,11 +20,6 @@ impl LiveModHandle {
     /// Initialise livemod with the external `livemod-gui` user interface
     pub fn new_gui() -> LiveModHandle {
         Self::new_with_ui("livemod-gui")
-    }
-
-    /// Initialise livemod with the external `livemod-tui` user interface
-    pub fn new_term() -> LiveModHandle {
-        Self::new_with_ui("livemod-tui")
     }
 
     /// Initialise livemod with an external user interface, for which the specified command will be run.
@@ -66,6 +62,9 @@ impl LiveModHandle {
         }
     }
 
+    /// Create a variable and send it to the external viewer to be tracked.
+    ///
+    /// TODO: Remove the variable from the external viewer when dropped
     pub fn create_variable<T: 'static + LiveMod>(&self, name: &str, var: T) -> ModVar<T> {
         let mod_var = ModVar {
             name: name.to_owned(),
@@ -82,14 +81,16 @@ impl LiveModHandle {
 }
 
 #[derive(Clone, Copy)]
-#[repr(transparent)]
-pub struct ModVarHandle {
+struct ModVarHandle {
     var: *const Mutex<dyn LiveMod>,
 }
 
 unsafe impl Send for ModVarHandle {}
 unsafe impl Sync for ModVarHandle {}
 
+/// A variable tracked by an external livemod viewer
+///
+/// A `ModVar` cannot be created directly, and must be created using the [`LiveModHandle::create_variable`] method.
 pub struct ModVar<T> {
     name: String,
     handle: LiveModHandle,
@@ -181,7 +182,7 @@ fn output_thread(output: ChildStdout, variables: Arc<RwLock<HashMap<String, ModV
                     }
                 }
                 var_handle.set_self(
-                    StructDataValue::deserialize_bin(
+                    TrackedDataValue::deserialize_bin(
                         &base64::decode_config(
                             line[line.iter().position(|&b| b == b'=').unwrap() + 1..].to_owned(),
                             base64::STANDARD_NO_PAD,

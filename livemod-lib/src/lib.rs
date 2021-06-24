@@ -14,14 +14,16 @@ pub use disabled::*;
 
 use nanoserde::{DeBin, SerBin};
 
+/// A named field in a tracked variable
 #[derive(SerBin, DeBin)]
-pub struct StructData {
+pub struct TrackedData {
     pub name: String,
-    pub data_type: StructDataType,
+    pub data_type: TrackedDataRepr,
 }
 
+/// The representation of a tracked field
 #[derive(SerBin, DeBin)]
-pub enum StructDataType {
+pub enum TrackedDataRepr {
     SignedSlider {
         storage_min: i64,
         storage_max: i64,
@@ -44,17 +46,17 @@ pub enum StructDataType {
     },
     Struct {
         name: String,
-        fields: Vec<StructData>,
+        fields: Vec<TrackedData>,
     },
 }
 
 #[derive(SerBin, DeBin)]
-pub enum StructDataValue {
+pub enum TrackedDataValue {
     SignedInt(i64),
     UnsignedInt(u64),
 }
 
-impl StructDataValue {
+impl TrackedDataValue {
     pub fn as_signed_int(&self) -> Option<&i64> {
         if let Self::SignedInt(v) = self {
             Some(v)
@@ -72,18 +74,22 @@ impl StructDataValue {
     }
 }
 
+/// Data which can be registered with a [`LiveModHandle`]
 pub trait LiveMod {
-    fn data_type(&self) -> StructDataType;
+    /// The default representation of the data
+    fn data_type(&self) -> TrackedDataRepr;
+    /// If this is a struct, get the field by this name
     fn get_named_value(&mut self, name: &str) -> &mut dyn LiveMod;
-    fn set_self(&mut self, value: StructDataValue);
+    /// If this is a value, set self to the given value
+    fn set_self(&mut self, value: TrackedDataValue);
 }
 
 macro_rules! unsigned_primitive_impl {
     ($($ty:ident),*) => {
         $(
         impl LiveMod for $ty {
-            fn data_type(&self) -> StructDataType {
-                StructDataType::UnsignedInteger {
+            fn data_type(&self) -> TrackedDataRepr {
+                TrackedDataRepr::UnsignedInteger {
                     min: $ty::MIN as u64,
                     max: $ty::MAX as u64,
                 }
@@ -93,11 +99,8 @@ macro_rules! unsigned_primitive_impl {
                 unimplemented!()
             }
 
-            fn set_self(&mut self, value: StructDataValue) {
-                match value {
-                    StructDataValue::UnsignedInt(val) => *self = val as $ty,
-                    _ => unimplemented!(),
-                }
+            fn set_self(&mut self, value: TrackedDataValue) {
+                *self = *value.as_unsigned_int().unwrap() as $ty
             }
         }
         )*
@@ -108,8 +111,8 @@ macro_rules! signed_primitive_impl {
     ($($ty:ident),*) => {
         $(
         impl LiveMod for $ty {
-            fn data_type(&self) -> StructDataType {
-                StructDataType::SignedInteger {
+            fn data_type(&self) -> TrackedDataRepr {
+                TrackedDataRepr::SignedInteger {
                     min: $ty::MIN as i64,
                     max: $ty::MAX as i64,
                 }
@@ -119,11 +122,8 @@ macro_rules! signed_primitive_impl {
                 unimplemented!()
             }
 
-            fn set_self(&mut self, value: StructDataValue) {
-                match value {
-                    StructDataValue::SignedInt(val) => *self = val as $ty,
-                    _ => unimplemented!(),
-                }
+            fn set_self(&mut self, value: TrackedDataValue) {
+                *self = *value.as_signed_int().unwrap() as $ty
             }
         }
         )*

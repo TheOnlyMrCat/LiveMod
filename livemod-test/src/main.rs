@@ -1,4 +1,4 @@
-use livemod::{LiveMod, LiveModHandle, StructDataType, StructDataValue};
+use livemod::{LiveMod, LiveModHandle, TrackedDataRepr, TrackedDataValue};
 
 fn main() {
     let livemod = LiveModHandle::new_gui();
@@ -30,8 +30,8 @@ struct Data {
 }
 
 impl LiveMod for Data {
-    fn data_type(&self) -> StructDataType {
-        livemod::StructDataType::UnsignedSlider {
+    fn data_type(&self) -> TrackedDataRepr {
+        livemod::TrackedDataRepr::UnsignedSlider {
             storage_min: u32::MIN as u64,
             storage_max: u32::MAX as u64,
             suggested_min: 1,
@@ -43,7 +43,7 @@ impl LiveMod for Data {
         unimplemented!()
     }
 
-    fn set_self(&mut self, value: StructDataValue) {
+    fn set_self(&mut self, value: TrackedDataValue) {
         self.value = *value.as_unsigned_int().unwrap() as u32;
     }
 }

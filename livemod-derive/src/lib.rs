@@ -25,7 +25,7 @@ pub fn livemod_derive(input: TokenStream) -> TokenStream {
                                 };
                                 Some((
                                     quote! {
-                                        ::livemod::StructData {
+                                        ::livemod::TrackedData {
                                             name: String::from(#name),
                                             data_type: ::livemod::LiveMod::data_type(&self.#ident)
                                         }
@@ -41,8 +41,8 @@ pub fn livemod_derive(input: TokenStream) -> TokenStream {
                         .unzip::<_, _, Vec<_>, Vec<_>>();
                     let gen = quote! {
                         impl ::livemod::LiveMod for #struct_name {
-                            fn data_type(&self) -> ::livemod::StructDataType {
-                                ::livemod::StructDataType::Struct {
+                            fn data_type(&self) -> ::livemod::TrackedDataRepr {
+                                ::livemod::TrackedDataRepr::Struct {
                                     name: String::from(stringify!(#struct_name)),
                                     fields: vec![
                                         #(#fields),*
@@ -57,7 +57,7 @@ pub fn livemod_derive(input: TokenStream) -> TokenStream {
                                 }
                             }
 
-                            fn set_self(&mut self, value: ::livemod::StructDataValue) {
+                            fn set_self(&mut self, value: ::livemod::TrackedDataValue) {
                                 panic!("Unexpected set operation!")
                             }
                         }
