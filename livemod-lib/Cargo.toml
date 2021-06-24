@@ -1,5 +1,9 @@
 [package]
 name = "livemod"
+description = "Unity-like runtime modification of variables"
+repository = "https://github.com/TheOnlyMrCat/LiveMod"
+categories = ["development-tools::debugging", "game-development"]
+license = "MIT OR Apache-2.0"
 version = "0.1.0"
 edition = "2018"
 
@@ -12,4 +16,4 @@ parking_lot = "0.11"
 nanoserde = "0.1"
 base64 = "0.13"
 
-livemod-derive = { path = "../livemod-derive", optional = true }
+livemod-derive = { path = "../livemod-derive", version = "0.1", optional = true }
