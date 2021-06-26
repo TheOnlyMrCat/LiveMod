@@ -1,12 +1,14 @@
 //! # livemod
 
+use std::ops::RangeInclusive;
+
 #[cfg(feature = "livemod-derive")]
 pub use livemod_derive::LiveMod;
 
-#[cfg_attr(feature = "disabled", allow(dead_code))]
-mod enabled;
 #[cfg_attr(not(feature = "disabled"), allow(dead_code))]
 mod disabled;
+#[cfg_attr(feature = "disabled", allow(dead_code))]
+mod enabled;
 
 #[cfg(not(feature = "disabled"))]
 pub use enabled::*;
@@ -86,6 +88,12 @@ pub trait LiveMod {
     fn set_self(&mut self, value: TrackedDataValue);
 }
 
+pub trait Slider {
+    fn repr_slider(&self, range: RangeInclusive<Self>) -> TrackedDataRepr
+    where
+        Self: Sized;
+}
+
 macro_rules! unsigned_primitive_impl {
     ($($ty:ident),*) => {
         $(
@@ -103,6 +111,17 @@ macro_rules! unsigned_primitive_impl {
 
             fn set_self(&mut self, value: TrackedDataValue) {
                 *self = *value.as_unsigned_int().unwrap() as $ty
+            }
+        }
+
+        impl Slider for $ty {
+            fn repr_slider(&self, range: RangeInclusive<Self>) -> TrackedDataRepr {
+                TrackedDataRepr::UnsignedSlider {
+                    storage_min: $ty::MIN as u64,
+                    storage_max: $ty::MAX as u64,
+                    suggested_min: *range.start() as u64,
+                    suggested_max: *range.end() as u64,
+                }
             }
         }
         )*
@@ -126,6 +145,17 @@ macro_rules! signed_primitive_impl {
 
             fn set_self(&mut self, value: TrackedDataValue) {
                 *self = *value.as_signed_int().unwrap() as $ty
+            }
+        }
+
+        impl Slider for $ty {
+            fn repr_slider(&self, range: RangeInclusive<Self>) -> TrackedDataRepr {
+                TrackedDataRepr::SignedSlider {
+                    storage_min: $ty::MIN as i64,
+                    storage_max: $ty::MAX as i64,
+                    suggested_min: *range.start() as i64,
+                    suggested_max: *range.end() as i64,
+                }
             }
         }
         )*

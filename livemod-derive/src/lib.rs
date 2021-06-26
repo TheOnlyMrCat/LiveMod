@@ -45,11 +45,21 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
                                     } else {
                                         ident.to_string()
                                     };
+                                let repr = if let Some(Attr::Repr(trait_, args)) =
+                                    attrs.iter().rfind(|attr| matches!(attr, Attr::Repr(_, _)))
+                                {
+                                    let mut repr_method = format!("repr_{}", trait_, );
+                                    repr_method.make_ascii_lowercase();
+                                    let repr_method = Ident::new(&repr_method, trait_.span());
+                                    quote! { #trait_::#repr_method(&self.#ident, #args) }
+                                } else {
+                                    quote! { ::livemod::LiveMod::data_type(&self.#ident) }
+                                };
                                 Some((
                                     quote! {
                                         ::livemod::TrackedData {
                                             name: String::from(#name),
-                                            data_type: ::livemod::LiveMod::data_type(&self.#ident)
+                                            data_type: #repr
                                         }
                                     },
                                     quote! {

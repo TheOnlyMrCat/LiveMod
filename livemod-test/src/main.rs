@@ -1,4 +1,4 @@
-use livemod::{LiveMod, LiveModHandle, TrackedDataRepr, TrackedDataValue};
+use livemod::{Slider, LiveMod, LiveModHandle, TrackedDataRepr, TrackedDataValue};
 
 fn main() {
     let livemod = LiveModHandle::new_gui();
@@ -50,6 +50,7 @@ impl LiveMod for Data {
 
 #[derive(Default, Debug, LiveMod, PartialEq, Clone, Copy)]
 struct DerivedData {
+    #[livemod(repr = Slider(0..=500))]
     value_1: u32,
     #[livemod(rename = "signed value")]
     value_2: i64,
