@@ -1,8 +1,8 @@
 use proc_macro2::{Delimiter, Ident, Spacing, TokenStream, TokenTree};
 use quote::quote;
-use syn::{DeriveInput, LitStr, Token, parenthesized, parse::Parse, punctuated::Punctuated};
+use syn::{parenthesized, parse::Parse, punctuated::Punctuated, DeriveInput, LitStr, Token};
 
-#[proc_macro_derive(LiveMod)]
+#[proc_macro_derive(LiveMod, attributes(livemod))]
 pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let ast: DeriveInput = syn::parse(input).unwrap();
 
@@ -27,14 +27,24 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
                                 })
                                 .collect::<Vec<_>>();
                             if !attrs.iter().any(|attr| matches!(attr, Attr::Skip)) {
-                                //TODO: #[livemod(rename = "new_ident")]
-                                //TODO: #[livemod(preserve_case)]
+                                //TODO: #[livemod(repr)]
                                 let ident = field.ident.unwrap();
-                                let name = {
-                                    let mut name = ident.to_string();
-                                    name.as_mut_str()[..1].make_ascii_uppercase();
-                                    name
-                                };
+                                let mut name = attrs
+                                    .iter()
+                                    .filter_map(|attr| match attr {
+                                        Attr::Rename(name) => Some(name.clone()),
+                                        _ => None,
+                                    })
+                                    .next_back()
+                                    .unwrap_or(ident.to_string());
+                                let name =
+                                    if !attrs.iter().any(|attr| matches!(attr, Attr::PreserveCase))
+                                    {
+                                        name.as_mut_str()[..1].make_ascii_uppercase();
+                                        name
+                                    } else {
+                                        ident.to_string()
+                                    };
                                 Some((
                                     quote! {
                                         ::livemod::TrackedData {
@@ -52,6 +62,7 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
                         })
                         .unzip::<_, _, Vec<_>, Vec<_>>();
                     let gen = quote! {
+                        #[automatically_derived]
                         impl ::livemod::LiveMod for #struct_name {
                             fn data_type(&self) -> ::livemod::TrackedDataRepr {
                                 ::livemod::TrackedDataRepr::Struct {
@@ -89,11 +100,13 @@ enum Attr {
     Skip,
     Rename(String),
     PreserveCase,
-    Repr(Ident, Punctuated<TokenStream, Token![,]>)
+    Repr(Ident, Punctuated<TokenStream, Token![,]>),
 }
 
 impl Parse for Attr {
-    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+    fn parse(direct_input: syn::parse::ParseStream) -> syn::Result<Self> {
+        let input;
+        parenthesized!(input in direct_input);
         let attr_type: Ident = input.parse()?;
         if attr_type == "skip" {
             if !input.is_empty() {
@@ -114,10 +127,12 @@ impl Parse for Attr {
             let trait_name = input.parse()?;
             let arguments;
             parenthesized!(arguments in input);
-            Ok(Attr::Repr(trait_name, arguments.parse_terminated(TokenStream::parse)?))
+            Ok(Attr::Repr(
+                trait_name,
+                arguments.parse_terminated(TokenStream::parse)?,
+            ))
         } else {
             Err(input.error("Unknown attribute content"))
         }
     }
 }
-

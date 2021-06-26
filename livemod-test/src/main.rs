@@ -51,5 +51,10 @@ impl LiveMod for Data {
 #[derive(Default, Debug, LiveMod, PartialEq, Clone, Copy)]
 struct DerivedData {
     value_1: u32,
+    #[livemod(rename = "signed value")]
     value_2: i64,
+    #[livemod(preserve_case)]
+    keep_me_lowercase: u32,
+    #[livemod(skip)]
+    runtime_flag: bool,
 }
