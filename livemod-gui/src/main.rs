@@ -114,6 +114,9 @@ fn main() {
 struct Values {
     i64: HashMap<String, i64>,
     u64: HashMap<String, u64>,
+    f64: HashMap<String, f64>,
+    bool: HashMap<String, bool>,
+    str: HashMap<String, String>,
 }
 
 enum Message {
@@ -207,6 +210,28 @@ fn recursive_ui<'a>(
                     .integer(),
                 );
             }
+            TrackedDataRepr::FloatSlider { storage_min, storage_max, suggested_min, suggested_max } => {
+                ui.add(
+                    egui::Slider::from_get_set(
+                        (*suggested_min) as f64..=(*suggested_max) as f64,
+                        |val| *match val {
+                            Some(val) => {
+                                values.f64.insert(
+                                    namespaced_name.clone(),
+                                    val.clamp(*storage_min, *storage_max),
+                                );
+                                let v = values.f64.get(&namespaced_name).unwrap();
+                                modified_variables.insert(
+                                    namespaced_name.clone(),
+                                    livemod::TrackedDataValue::Float(*v),
+                                );
+                                v
+                            }
+                            None => values.f64.entry(namespaced_name.clone()).or_default(),
+                        },
+                    ),
+                );
+            },
             TrackedDataRepr::SignedInteger { min, max } => {
                 if ui
                     .add(
@@ -240,6 +265,44 @@ fn recursive_ui<'a>(
                         livemod::TrackedDataValue::UnsignedInt(
                             *values.u64.entry(namespaced_name.clone()).or_default(),
                         ),
+                    );
+                }
+            }
+            TrackedDataRepr::Float { min, max } => {
+                if ui
+                    .add(
+                        egui::DragValue::new(
+                            values.f64.entry(namespaced_name.clone()).or_default(),
+                        )
+                        .clamp_range(*min..=*max),
+                    )
+                    .changed()
+                {
+                    modified_variables.insert(
+                        namespaced_name.clone(),
+                        livemod::TrackedDataValue::Float(
+                            *values.f64.entry(namespaced_name.clone()).or_default(),
+                        ),
+                    );
+                }
+            },
+            TrackedDataRepr::Bool => {
+                if ui.checkbox(values.bool.entry(namespaced_name.clone()).or_default(), "").changed() {
+                    modified_variables.insert(
+                        namespaced_name.clone(),
+                        livemod::TrackedDataValue::Bool(*values.bool.entry(namespaced_name.clone()).or_default())
+                    );
+                }
+            }
+            TrackedDataRepr::String { multiline } => {
+                if if *multiline {
+                    ui.text_edit_multiline(values.str.entry(namespaced_name.clone()).or_default())
+                } else {
+                    ui.text_edit_singleline(values.str.entry(namespaced_name.clone()).or_default())
+                }.changed() {
+                    modified_variables.insert(
+                        namespaced_name.clone(),
+                        livemod::TrackedDataValue::String(values.str.entry(namespaced_name.clone()).or_default().clone())
                     );
                 }
             }

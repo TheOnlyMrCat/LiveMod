@@ -135,12 +135,16 @@ impl Parse for Attr {
         } else if attr_type == "repr" {
             input.parse::<Token![=]>()?;
             let trait_name = input.parse()?;
-            let arguments;
-            parenthesized!(arguments in input);
-            Ok(Attr::Repr(
-                trait_name,
-                arguments.parse_terminated(TokenStream::parse)?,
-            ))
+            if !input.is_empty() {
+                let arguments;
+                parenthesized!(arguments in input);
+                Ok(Attr::Repr(
+                    trait_name,
+                    arguments.parse_terminated(TokenStream::parse)?,
+                ))
+            } else {
+                Ok(Attr::Repr(trait_name, Punctuated::new()))
+            }
         } else {
             Err(input.error("Unknown attribute content"))
         }
