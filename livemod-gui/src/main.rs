@@ -3,7 +3,7 @@ use std::io::{BufRead, BufReader};
 use std::sync::mpsc::{self, Sender};
 
 use glium::glutin;
-use livemod::{TrackedData, TrackedDataRepr, TrackedDataValue};
+use livemod::{TrackedDataRepr, TrackedDataValue};
 use nanoserde::{DeBin, SerBin};
 
 fn create_display(event_loop: &glutin::event_loop::EventLoop<()>) -> glium::Display {

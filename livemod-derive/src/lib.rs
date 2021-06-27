@@ -1,4 +1,4 @@
-use proc_macro2::{Delimiter, Ident, Spacing, TokenStream, TokenTree};
+use proc_macro2::{Ident, TokenStream};
 use quote::quote;
 use syn::{parenthesized, parse::Parse, punctuated::Punctuated, DeriveInput, LitStr, Token};
 
@@ -7,101 +7,105 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
     let ast: DeriveInput = syn::parse(input).unwrap();
 
     match ast.data {
-        syn::Data::Struct(st) => {
-            match st.fields {
-                syn::Fields::Named(fields) => {
-                    let struct_name = ast.ident;
-                    let (fields, matches) = fields
-                        .named
-                        .into_iter()
-                        .filter_map(|field| {
-                            let attrs = field
-                                .attrs
-                                .into_iter()
-                                .filter_map(|attr| {
-                                    if attr.path.is_ident("livemod") {
-                                        Some(syn::parse2(attr.tokens).unwrap())
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .collect::<Vec<_>>();
-                            if !attrs.iter().any(|attr| matches!(attr, Attr::Skip)) {
-                                //TODO: #[livemod(repr)]
-                                let ident = field.ident.unwrap();
-                                let mut name = attrs
-                                    .iter()
-                                    .filter_map(|attr| match attr {
-                                        Attr::Rename(name) => Some(name.clone()),
-                                        _ => None,
-                                    })
-                                    .next_back()
-                                    .unwrap_or(ident.to_string());
-                                let name =
-                                    if !attrs.iter().any(|attr| matches!(attr, Attr::PreserveCase))
-                                    {
-                                        name.as_mut_str()[..1].make_ascii_uppercase();
-                                        name
-                                    } else {
-                                        ident.to_string()
-                                    };
-                                let repr = if let Some(Attr::Repr(trait_, args)) =
-                                    attrs.iter().rfind(|attr| matches!(attr, Attr::Repr(_, _)))
-                                {
-                                    let mut repr_method = format!("repr_{}", trait_, );
-                                    repr_method.make_ascii_lowercase();
-                                    let repr_method = Ident::new(&repr_method, trait_.span());
-                                    quote! { #trait_::#repr_method(&self.#ident, #args) }
+        syn::Data::Struct(st) => match st.fields {
+            syn::Fields::Named(fields) => {
+                let struct_name = ast.ident;
+                let (fields, matches) = fields
+                    .named
+                    .into_iter()
+                    .filter_map(|field| {
+                        let attrs = match field
+                            .attrs
+                            .into_iter()
+                            .filter_map(|attr| {
+                                if attr.path.is_ident("livemod") {
+                                    Some(syn::parse2(attr.tokens))
                                 } else {
-                                    quote! { ::livemod::LiveMod::data_type(&self.#ident) }
+                                    None
+                                }
+                            })
+                            .collect::<Result<Vec<_>, _>>()
+                        {
+                            Ok(attrs) => attrs,
+                            Err(error) => {
+                                let ident = field.ident.unwrap();
+                                let name = ident.to_string();
+                                return Some((error.to_compile_error(), quote! { #name => &mut self.#ident }))
+                            }
+                        };
+                        if !attrs.iter().any(|attr| matches!(attr, Attr::Skip)) {
+                            let ident = field.ident.unwrap();
+                            let mut name = attrs
+                                .iter()
+                                .filter_map(|attr| match attr {
+                                    Attr::Rename(name) => Some(name.clone()),
+                                    _ => None,
+                                })
+                                .next_back()
+                                .unwrap_or(ident.to_string());
+                            let name =
+                                if !attrs.iter().any(|attr| matches!(attr, Attr::PreserveCase)) {
+                                    name.as_mut_str()[..1].make_ascii_uppercase();
+                                    name
+                                } else {
+                                    ident.to_string()
                                 };
-                                Some((
-                                    quote! {
-                                        ::livemod::TrackedData {
-                                            name: String::from(#name),
-                                            data_type: #repr
-                                        }
-                                    },
-                                    quote! {
-                                        #name => &mut self.#ident
-                                    },
-                                ))
+                            let repr = if let Some(Attr::Repr(trait_, args)) =
+                                attrs.iter().rfind(|attr| matches!(attr, Attr::Repr(_, _)))
+                            {
+                                let mut repr_method = format!("repr_{}", trait_,);
+                                repr_method.make_ascii_lowercase();
+                                let repr_method = Ident::new(&repr_method, trait_.span());
+                                quote! { #trait_::#repr_method(&self.#ident, #args) }
                             } else {
-                                None
-                            }
-                        })
-                        .unzip::<_, _, Vec<_>, Vec<_>>();
-                    let gen = quote! {
-                        #[automatically_derived]
-                        impl ::livemod::LiveMod for #struct_name {
-                            fn data_type(&self) -> ::livemod::TrackedDataRepr {
-                                ::livemod::TrackedDataRepr::Struct {
-                                    name: String::from(stringify!(#struct_name)),
-                                    fields: vec![
-                                        #(#fields),*
-                                    ]
-                                }
-                            }
-
-                            fn get_named_value(&mut self, name: &str) -> &mut ::livemod::LiveMod {
-                                match name {
-                                    #(#matches ,)*
-                                    _ => panic!("Unexpected value name!"),
-                                }
-                            }
-
-                            fn set_self(&mut self, value: ::livemod::TrackedDataValue) {
-                                panic!("Unexpected set operation!")
+                                quote! { ::livemod::LiveMod::data_type(&self.#ident) }
+                            };
+                            Some((
+                                quote! {
+                                    ::livemod::TrackedData {
+                                        name: String::from(#name),
+                                        data_type: #repr
+                                    }
+                                },
+                                quote! {
+                                    #name => &mut self.#ident
+                                },
+                            ))
+                        } else {
+                            None
+                        }
+                    })
+                    .unzip::<_, _, Vec<_>, Vec<_>>();
+                let gen = quote! {
+                    #[automatically_derived]
+                    impl ::livemod::LiveMod for #struct_name {
+                        fn data_type(&self) -> ::livemod::TrackedDataRepr {
+                            ::livemod::TrackedDataRepr::Struct {
+                                name: String::from(stringify!(#struct_name)),
+                                fields: vec![
+                                    #(#fields),*
+                                ]
                             }
                         }
-                    };
-                    gen.into()
-                }
-                syn::Fields::Unnamed(fields) => todo!(),
-                syn::Fields::Unit => todo!(),
+
+                        fn get_named_value(&mut self, name: &str) -> &mut ::livemod::LiveMod {
+                            match name {
+                                #(#matches ,)*
+                                _ => panic!("Unexpected value name!"),
+                            }
+                        }
+
+                        fn set_self(&mut self, value: ::livemod::TrackedDataValue) {
+                            panic!("Unexpected set operation!")
+                        }
+                    }
+                };
+                gen.into()
             }
-        }
-        syn::Data::Enum(en) => todo!(),
+            syn::Fields::Unnamed(_fields) => todo!(),
+            syn::Fields::Unit => todo!(),
+        },
+        syn::Data::Enum(_en) => todo!(),
         syn::Data::Union(_) => todo!(),
     }
 }
@@ -146,7 +150,10 @@ impl Parse for Attr {
                 Ok(Attr::Repr(trait_name, Punctuated::new()))
             }
         } else {
-            Err(input.error("Unknown attribute content"))
+            Err(syn::Error::new(
+                attr_type.span(),
+                "Unrecognised attribute tag",
+            ))
         }
     }
 }

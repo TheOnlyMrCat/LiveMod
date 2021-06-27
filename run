@@ -1,6 +1,6 @@
 #- b!
-cargo build --package livemod-gui
-cargo build --package livemod-test
+cargo check --package livemod-gui
+cargo check --package livemod-test
 #/
 
 #-

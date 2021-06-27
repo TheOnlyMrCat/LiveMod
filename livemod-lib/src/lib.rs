@@ -259,7 +259,7 @@ impl LiveMod for bool {
         TrackedDataRepr::Bool
     }
 
-    fn get_named_value(&mut self, name: &str) -> &mut dyn LiveMod {
+    fn get_named_value(&mut self, _: &str) -> &mut dyn LiveMod {
         unimplemented!()
     }
 
@@ -275,7 +275,7 @@ impl LiveMod for String {
         }
     }
 
-    fn get_named_value(&mut self, name: &str) -> &mut dyn LiveMod {
+    fn get_named_value(&mut self, _: &str) -> &mut dyn LiveMod {
         unimplemented!()
     }
 
