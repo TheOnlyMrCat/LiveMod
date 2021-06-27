@@ -674,7 +674,7 @@ dependencies = [
 
 [[package]]
 name = "livemod"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "base64",
  "livemod-derive",
@@ -684,7 +684,7 @@ dependencies = [
 
 [[package]]
 name = "livemod-derive"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -693,7 +693,7 @@ dependencies = [
 
 [[package]]
 name = "livemod-gui"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "base64",
  "egui",
