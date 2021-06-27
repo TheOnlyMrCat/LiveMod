@@ -139,6 +139,15 @@ pub trait Multiline {
     fn repr_multiline(&self) -> TrackedDataRepr;
 }
 
+#[macro_export]
+macro_rules! livemod_static {
+    ($($vis:vis static $name:ident : $ty:ty = $val:expr;)*) => {
+        $(
+        $vis static $name: $crate::StaticModVar<$ty> = $crate::StaticModVar::new($val);
+        )*
+    }
+}
+
 macro_rules! unsigned_primitive_impl {
     ($($ty:ident),*) => {
         $(

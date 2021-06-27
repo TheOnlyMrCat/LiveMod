@@ -63,6 +63,13 @@ impl LiveModHandle {
         }
     }
 
+    pub fn track_variable<T: 'static + LiveMod>(&self, name: &str, var: &'static StaticModVar<T>) {
+        let var_handle = ModVarHandle {
+            var: &var.value as *const _,
+        };
+        self.sender.send(Message::NewVariable(name.to_owned(), var_handle)).unwrap();
+    }
+
     /// Create a variable and send it to the external viewer to be tracked.
     ///
     /// TODO: Remove the variable from the external viewer when dropped
@@ -106,6 +113,28 @@ impl<T> ModVar<T> {
 impl<T> Drop for ModVar<T> {
     fn drop(&mut self) {
         self.handle.variables.write().remove(&self.name);
+    }
+}
+
+/// A static trackable livemod variable
+pub struct StaticModVar<T> {
+    value: Mutex<T>,
+}
+
+impl<T> StaticModVar<T> {
+    pub const fn new(value: T) -> StaticModVar<T> {
+        StaticModVar {
+            value: parking_lot::const_mutex(value)
+        }
+    }
+
+    pub fn lock(&self) -> ModVarGuard<T> {
+        ModVarGuard(self.value.lock())
+    }
+
+    pub fn lock_mut(&mut self) -> ModVarMutGuard<T> {
+        ModVarMutGuard(self.value.lock())
+        //TODO: Update value in GUI
     }
 }
 

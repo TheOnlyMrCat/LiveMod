@@ -1,18 +1,31 @@
-use livemod::{LiveMod, LiveModHandle, Multiline, Slider, TrackedDataRepr, TrackedDataValue};
+use livemod::{LiveMod, LiveModHandle, Multiline, Slider, TrackedDataRepr, TrackedDataValue, livemod_static};
+
+livemod_static! {
+    static STRAIGHT_VALUE: f32 = 0.0;
+    static NON_DERIVED: Data = Data { value: 0 };
+}
 
 fn main() {
     let livemod = LiveModHandle::new_gui();
 
-    let nonderived = livemod.create_variable("Non-derived", Data::default());
+    livemod.track_variable("Float", &STRAIGHT_VALUE);
+    livemod.track_variable("Non-derived", &NON_DERIVED);
     let derived = livemod.create_variable("Derived", DerivedData::default());
 
-    let mut prev_nonderived = nonderived.lock().value;
+    let mut prev_float = *STRAIGHT_VALUE.lock();
+    let mut prev_nonderived = NON_DERIVED.lock().value;
     let mut prev_derived = derived.lock().clone();
+    println!("Float: {}", prev_float);
     println!("Non-derived: {}", prev_nonderived);
     println!("Derived: {:?}", prev_derived);
     loop {
-        let cur_nonderived = nonderived.lock().value;
+        let cur_float = *STRAIGHT_VALUE.lock();
+        let cur_nonderived = NON_DERIVED.lock().value;
         let cur_derived = derived.lock().clone();
+        if cur_float != prev_float {
+            println!("Float: {}", cur_float);
+            prev_float = cur_float;
+        }
         if cur_nonderived != prev_nonderived {
             println!("Non-derived: {}", cur_nonderived);
             prev_nonderived = cur_nonderived;
