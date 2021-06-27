@@ -70,8 +70,6 @@ struct DerivedData {
     floating_point: f32,
     #[livemod(repr = Slider(-5.0..=10.0))]
     double_float: f64,
-    #[livemod(preserve_case)]
-    keep_me_lowercase: u32,
     #[livemod(skip)]
     runtime_flag: bool,
     toggleable_flag: bool,

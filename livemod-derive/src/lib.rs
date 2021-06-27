@@ -35,21 +35,19 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
                         };
                         if !attrs.iter().any(|attr| matches!(attr, Attr::Skip)) {
                             let ident = field.ident.unwrap();
-                            let mut name = attrs
+                            let name = attrs
                                 .iter()
                                 .filter_map(|attr| match attr {
                                     Attr::Rename(name) => Some(name.clone()),
                                     _ => None,
                                 })
                                 .next_back()
-                                .unwrap_or(ident.to_string());
-                            let name =
-                                if !attrs.iter().any(|attr| matches!(attr, Attr::PreserveCase)) {
+                                .unwrap_or({
+                                    let mut name = ident.to_string();
                                     name.as_mut_str()[..1].make_ascii_uppercase();
+                                    name = name.replace('_', " ");
                                     name
-                                } else {
-                                    ident.to_string()
-                                };
+                                });
                             let repr = if let Some(Attr::Repr(trait_, args)) =
                                 attrs.iter().rfind(|attr| matches!(attr, Attr::Repr(_, _)))
                             {
@@ -113,7 +111,6 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
 enum Attr {
     Skip,
     Rename(String),
-    PreserveCase,
     Repr(Ident, Punctuated<TokenStream, Token![,]>),
 }
 
@@ -127,11 +124,6 @@ impl Parse for Attr {
                 Err(input.error("Expected end of attribute content"))?;
             }
             Ok(Attr::Skip)
-        } else if attr_type == "preserve_case" {
-            if !input.is_empty() {
-                Err(input.error("Expected end of attribute content"))?;
-            }
-            Ok(Attr::PreserveCase)
         } else if attr_type == "rename" {
             input.parse::<Token![=]>()?;
             let new_name: LitStr = input.parse()?;
