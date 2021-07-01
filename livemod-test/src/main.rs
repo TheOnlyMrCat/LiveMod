@@ -1,4 +1,7 @@
-use livemod::{LiveMod, LiveModHandle, Multiline, Slider, TrackedDataRepr, TrackedDataValue, Trigger, livemod_static};
+use livemod::{
+    livemod_static, LiveMod, LiveModHandle, Multiline, Slider, TrackedDataRepr, TrackedDataValue,
+    Trigger,
+};
 
 livemod_static! {
     static STRAIGHT_VALUE: f32 = 0.0;

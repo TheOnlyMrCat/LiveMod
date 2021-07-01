@@ -67,7 +67,9 @@ impl LiveModHandle {
         let var_handle = ModVarHandle {
             var: &var.value as *const _,
         };
-        self.sender.send(Message::NewVariable(name.to_owned(), var_handle)).unwrap();
+        self.sender
+            .send(Message::NewVariable(name.to_owned(), var_handle))
+            .unwrap();
     }
 
     /// Create a variable and send it to the external viewer to be tracked.
@@ -103,7 +105,7 @@ impl<T: LiveMod + 'static> ModVar<T> {
     pub fn lock(&self) -> ModVarGuard<T> {
         ModVarGuard(self.value.lock())
     }
-    
+
     pub fn lock_mut(&mut self) -> ModVarMutGuard<T> {
         ModVarMutGuard(self.value.lock(), Some(UpdateMessage::new(&self)))
     }
@@ -123,10 +125,10 @@ pub struct StaticModVar<T> {
 impl<T> StaticModVar<T> {
     pub const fn new(value: T) -> StaticModVar<T> {
         StaticModVar {
-            value: parking_lot::const_mutex(value)
+            value: parking_lot::const_mutex(value),
         }
     }
-    
+
     pub fn lock(&self) -> ModVarGuard<T> {
         ModVarGuard(self.value.lock())
     }
@@ -171,13 +173,17 @@ impl UpdateMessage {
     fn new<T: LiveMod + 'static>(var: &ModVar<T>) -> UpdateMessage {
         UpdateMessage {
             name: var.name.clone(),
-            handle: ModVarHandle { var: &*var.value as *const _ },
+            handle: ModVarHandle {
+                var: &*var.value as *const _,
+            },
             sender: var.handle.sender.clone(),
         }
     }
 
     fn send(self) {
-        self.sender.send(Message::UpdatedVariable(self.name, self.handle)).unwrap();
+        self.sender
+            .send(Message::UpdatedVariable(self.name, self.handle))
+            .unwrap();
     }
 }
 
@@ -218,22 +224,31 @@ fn input_thread(
                         input,
                         "n{};{};{}",
                         &name,
-                        base64::encode_config(var.data_type().serialize_bin(), base64::STANDARD_NO_PAD),
-                        base64::encode_config(var.get_self().serialize_bin(), base64::STANDARD_NO_PAD),
+                        base64::encode_config(
+                            var.data_type().serialize_bin(),
+                            base64::STANDARD_NO_PAD
+                        ),
+                        base64::encode_config(
+                            var.get_self().serialize_bin(),
+                            base64::STANDARD_NO_PAD
+                        ),
                     )
                     .unwrap();
                     variables.write().insert(name, handle);
                 }
-                Message::UpdatedVariable(name, handle) =>  {
+                Message::UpdatedVariable(name, handle) => {
                     let var = unsafe { (*handle.var).lock() };
                     writeln!(
                         input,
                         "u{};{}",
                         &name,
-                        base64::encode_config(var.get_self().serialize_bin(), base64::STANDARD_NO_PAD),
+                        base64::encode_config(
+                            var.get_self().serialize_bin(),
+                            base64::STANDARD_NO_PAD
+                        ),
                     )
                     .unwrap()
-                },
+                }
             },
             Err(mpsc::RecvError) => {
                 // The LiveModHandle which spawned this thread has

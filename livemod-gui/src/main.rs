@@ -41,28 +41,46 @@ fn main() {
     event_loop.run(move |event, _, control_flow| match event {
         glutin::event::Event::MainEventsCleared => {
             while let Ok(msg) = recv.try_recv() {
-                fn recursive_namespaced_insert(namespaced_name: String, value: TrackedDataValue, values: &mut Values) {
+                fn recursive_namespaced_insert(
+                    namespaced_name: String,
+                    value: TrackedDataValue,
+                    values: &mut Values,
+                ) {
                     match value {
-                        TrackedDataValue::SignedInt(i) => { values.i64.insert(namespaced_name, i); },
-                        TrackedDataValue::UnsignedInt(u) => { values.u64.insert(namespaced_name, u); },
-                        TrackedDataValue::Float(f) => { values.f64.insert(namespaced_name, f); },
-                        TrackedDataValue::Bool(b) => { values.bool.insert(namespaced_name, b); },
-                        TrackedDataValue::String(s) => { values.str.insert(namespaced_name, s); },
+                        TrackedDataValue::SignedInt(i) => {
+                            values.i64.insert(namespaced_name, i);
+                        }
+                        TrackedDataValue::UnsignedInt(u) => {
+                            values.u64.insert(namespaced_name, u);
+                        }
+                        TrackedDataValue::Float(f) => {
+                            values.f64.insert(namespaced_name, f);
+                        }
+                        TrackedDataValue::Bool(b) => {
+                            values.bool.insert(namespaced_name, b);
+                        }
+                        TrackedDataValue::String(s) => {
+                            values.str.insert(namespaced_name, s);
+                        }
                         TrackedDataValue::Struct(fields) => {
                             for (field_name, field_value) in fields {
                                 let name = format!("{}:{}", namespaced_name, field_name);
                                 recursive_namespaced_insert(name, field_value, values);
                             }
-                        },
+                        }
                         TrackedDataValue::Trigger => unimplemented!(),
                     }
                 }
 
                 match msg {
                     Message::NewData(name, data, initial_value) => {
-                        recursive_namespaced_insert(format!(":{}", &name), initial_value, &mut values);
+                        recursive_namespaced_insert(
+                            format!(":{}", &name),
+                            initial_value,
+                            &mut values,
+                        );
                         current_variables.insert(name, data);
-                    },
+                    }
                     Message::UpdateData(name, value) => {
                         recursive_namespaced_insert(format!(":{}", name), value, &mut values);
                     }
@@ -232,28 +250,31 @@ fn recursive_ui<'a>(
                     .integer(),
                 );
             }
-            TrackedDataRepr::FloatSlider { storage_min, storage_max, suggested_min, suggested_max } => {
-                ui.add(
-                    egui::Slider::from_get_set(
-                        (*suggested_min) as f64..=(*suggested_max) as f64,
-                        |val| *match val {
-                            Some(val) => {
-                                values.f64.insert(
-                                    namespaced_name.clone(),
-                                    val.clamp(*storage_min, *storage_max),
-                                );
-                                let v = values.f64.get(&namespaced_name).unwrap();
-                                modified_variables.insert(
-                                    namespaced_name.clone(),
-                                    livemod::TrackedDataValue::Float(*v),
-                                );
-                                v
-                            }
-                            None => values.f64.entry(namespaced_name.clone()).or_default(),
-                        },
-                    ),
-                );
-            },
+            TrackedDataRepr::FloatSlider {
+                storage_min,
+                storage_max,
+                suggested_min,
+                suggested_max,
+            } => {
+                ui.add(egui::Slider::from_get_set(
+                    (*suggested_min) as f64..=(*suggested_max) as f64,
+                    |val| *match val {
+                        Some(val) => {
+                            values.f64.insert(
+                                namespaced_name.clone(),
+                                val.clamp(*storage_min, *storage_max),
+                            );
+                            let v = values.f64.get(&namespaced_name).unwrap();
+                            modified_variables.insert(
+                                namespaced_name.clone(),
+                                livemod::TrackedDataValue::Float(*v),
+                            );
+                            v
+                        }
+                        None => values.f64.entry(namespaced_name.clone()).or_default(),
+                    },
+                ));
+            }
             TrackedDataRepr::SignedInteger { min, max } => {
                 if ui
                     .add(
@@ -307,21 +328,24 @@ fn recursive_ui<'a>(
                         ),
                     );
                 }
-            },
+            }
             TrackedDataRepr::Bool => {
-                if ui.checkbox(values.bool.entry(namespaced_name.clone()).or_default(), "").changed() {
+                if ui
+                    .checkbox(values.bool.entry(namespaced_name.clone()).or_default(), "")
+                    .changed()
+                {
                     modified_variables.insert(
                         namespaced_name.clone(),
-                        livemod::TrackedDataValue::Bool(*values.bool.entry(namespaced_name.clone()).or_default())
+                        livemod::TrackedDataValue::Bool(
+                            *values.bool.entry(namespaced_name.clone()).or_default(),
+                        ),
                     );
                 }
             }
             TrackedDataRepr::Trigger => {
                 if ui.button(&namespaced_name).clicked() {
-                    modified_variables.insert(
-                        namespaced_name.clone(),
-                        livemod::TrackedDataValue::Trigger,
-                    );
+                    modified_variables
+                        .insert(namespaced_name.clone(), livemod::TrackedDataValue::Trigger);
                 }
             }
             TrackedDataRepr::String { multiline } => {
@@ -329,10 +353,18 @@ fn recursive_ui<'a>(
                     ui.text_edit_multiline(values.str.entry(namespaced_name.clone()).or_default())
                 } else {
                     ui.text_edit_singleline(values.str.entry(namespaced_name.clone()).or_default())
-                }.changed() {
+                }
+                .changed()
+                {
                     modified_variables.insert(
                         namespaced_name.clone(),
-                        livemod::TrackedDataValue::String(values.str.entry(namespaced_name.clone()).or_default().clone())
+                        livemod::TrackedDataValue::String(
+                            values
+                                .str
+                                .entry(namespaced_name.clone())
+                                .or_default()
+                                .clone(),
+                        ),
                     );
                 }
             }
@@ -358,7 +390,7 @@ fn reader_thread(sender: Sender<Message>) {
                         )
                         .unwrap(),
                         TrackedDataValue::deserialize_bin(
-                            &base64::decode_config(&segments[2], base64::STANDARD_NO_PAD).unwrap()
+                            &base64::decode_config(&segments[2], base64::STANDARD_NO_PAD).unwrap(),
                         )
                         .unwrap(),
                     ))
@@ -371,9 +403,9 @@ fn reader_thread(sender: Sender<Message>) {
                     .send(Message::UpdateData(
                         String::from_utf8(segments[0].to_owned()).unwrap(),
                         TrackedDataValue::deserialize_bin(
-                            &base64::decode_config(&segments[1], base64::STANDARD_NO_PAD).unwrap()
+                            &base64::decode_config(&segments[1], base64::STANDARD_NO_PAD).unwrap(),
                         )
-                        .unwrap()
+                        .unwrap(),
                     ))
                     .unwrap();
             }

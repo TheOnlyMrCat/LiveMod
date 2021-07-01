@@ -318,9 +318,7 @@ impl LiveMod for bool {
 
 impl LiveMod for String {
     fn data_type(&self) -> TrackedDataRepr {
-        TrackedDataRepr::String {
-            multiline: false,
-        }
+        TrackedDataRepr::String { multiline: false }
     }
 
     fn get_named_value(&mut self, _: &str) -> &mut dyn LiveMod {
@@ -338,8 +336,6 @@ impl LiveMod for String {
 
 impl Multiline for String {
     fn repr_multiline(&self) -> TrackedDataRepr {
-        TrackedDataRepr::String {
-            multiline: true
-        }
+        TrackedDataRepr::String { multiline: true }
     }
 }
