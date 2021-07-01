@@ -104,8 +104,8 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
                             }
                         }
 
-                        fn set_self(&mut self, value: ::livemod::TrackedDataValue) {
-                            panic!("Unexpected set operation!")
+                        fn trigger(&mut self, trigger: ::livemod::Trigger) {
+                            panic!("Unexpected trigger operation!")
                         }
 
                         fn get_self(&self) -> ::livemod::TrackedDataValue {

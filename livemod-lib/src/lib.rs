@@ -70,7 +70,7 @@ pub enum TrackedDataRepr {
     },
 }
 
-#[derive(SerBin, DeBin)]
+#[derive(Debug, Clone, SerBin, DeBin)]
 pub enum TrackedDataValue {
     SignedInt(i64),
     UnsignedInt(u64),
@@ -123,14 +123,38 @@ impl TrackedDataValue {
     }
 }
 
+#[derive(Clone, Debug)]
+pub enum Trigger {
+    Set(TrackedDataValue),
+    Trigger(String),
+}
+
+impl Trigger {
+    pub fn try_into_set(self) -> Result<TrackedDataValue, Self> {
+        if let Self::Set(v) = self {
+            Ok(v)
+        } else {
+            Err(self)
+        }
+    }
+
+    pub fn try_into_trigger(self) -> Result<String, Self> {
+        if let Self::Trigger(v) = self {
+            Ok(v)
+        } else {
+            Err(self)
+        }
+    }
+}
+
 /// Data which can be registered with a [`LiveModHandle`]
 pub trait LiveMod {
     /// The default representation of the data
     fn data_type(&self) -> TrackedDataRepr;
     /// If this is a struct, get the field by this name
     fn get_named_value(&mut self, name: &str) -> &mut dyn LiveMod;
-    /// If this is a value, set self to the given value
-    fn set_self(&mut self, value: TrackedDataValue);
+    /// Trigger an action on this data
+    fn trigger(&mut self, trigger: Trigger);
     /// Return the current value of this data, whether it is a struct or a value
     fn get_self(&self) -> TrackedDataValue;
 }
@@ -171,8 +195,8 @@ macro_rules! unsigned_primitive_impl {
                 unimplemented!()
             }
 
-            fn set_self(&mut self, value: TrackedDataValue) {
-                *self = *value.as_unsigned_int().unwrap() as $ty
+            fn trigger(&mut self, trigger: Trigger) {
+                *self = *trigger.try_into_set().unwrap().as_unsigned_int().unwrap() as $ty
             }
 
             fn get_self(&self) -> TrackedDataValue {
@@ -209,8 +233,8 @@ macro_rules! signed_primitive_impl {
                 unimplemented!()
             }
 
-            fn set_self(&mut self, value: TrackedDataValue) {
-                *self = *value.as_signed_int().unwrap() as $ty
+            fn trigger(&mut self, trigger: Trigger) {
+                *self = *trigger.try_into_set().unwrap().as_signed_int().unwrap() as $ty
             }
 
             fn get_self(&self) -> TrackedDataValue {
@@ -247,8 +271,8 @@ macro_rules! float_primitive_impl {
                 unimplemented!()
             }
 
-            fn set_self(&mut self, value: TrackedDataValue) {
-                *self = *value.as_float().unwrap() as $ty
+            fn trigger(&mut self, trigger: Trigger) {
+                *self = *trigger.try_into_set().unwrap().as_float().unwrap() as $ty
             }
 
             fn get_self(&self) -> TrackedDataValue {
@@ -283,8 +307,8 @@ impl LiveMod for bool {
         unimplemented!()
     }
 
-    fn set_self(&mut self, value: TrackedDataValue) {
-        *self = *value.as_bool().unwrap()
+    fn trigger(&mut self, trigger: Trigger) {
+        *self = *trigger.try_into_set().unwrap().as_bool().unwrap()
     }
 
     fn get_self(&self) -> TrackedDataValue {
@@ -303,8 +327,8 @@ impl LiveMod for String {
         unimplemented!()
     }
 
-    fn set_self(&mut self, value: TrackedDataValue) {
-        *self = value.into_string().unwrap()
+    fn trigger(&mut self, trigger: Trigger) {
+        *self = trigger.try_into_set().unwrap().into_string().unwrap()
     }
 
     fn get_self(&self) -> TrackedDataValue {

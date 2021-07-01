@@ -1,4 +1,4 @@
-use livemod::{LiveMod, LiveModHandle, Multiline, Slider, TrackedDataRepr, TrackedDataValue, livemod_static};
+use livemod::{LiveMod, LiveModHandle, Multiline, Slider, TrackedDataRepr, TrackedDataValue, Trigger, livemod_static};
 
 livemod_static! {
     static STRAIGHT_VALUE: f32 = 0.0;
@@ -58,8 +58,8 @@ impl LiveMod for Data {
         unimplemented!()
     }
 
-    fn set_self(&mut self, value: TrackedDataValue) {
-        self.value = *value.as_unsigned_int().unwrap() as u32;
+    fn trigger(&mut self, trigger: Trigger) {
+        self.value = *trigger.try_into_set().unwrap().as_unsigned_int().unwrap() as u32;
     }
 
     fn get_self(&self) -> TrackedDataValue {

@@ -8,7 +8,7 @@ use std::sync::Arc;
 use nanoserde::{DeBin, SerBin};
 use parking_lot::{Mutex, MutexGuard, RwLock};
 
-use crate::{LiveMod, TrackedDataValue};
+use crate::{LiveMod, TrackedDataValue, Trigger};
 
 /// A handle to an external livemod viewer.
 #[derive(Clone)]
@@ -270,7 +270,7 @@ fn output_thread(output: ChildStdout, variables: Arc<RwLock<HashMap<String, ModV
                         var_handle = var_handle.get_named_value(name);
                     }
                 }
-                var_handle.set_self(
+                var_handle.trigger(Trigger::Set(
                     TrackedDataValue::deserialize_bin(
                         &base64::decode_config(
                             line[line.iter().position(|&b| b == b';').unwrap() + 1..].to_owned(),
@@ -279,7 +279,7 @@ fn output_thread(output: ChildStdout, variables: Arc<RwLock<HashMap<String, ModV
                         .unwrap(),
                     )
                     .unwrap(),
-                )
+                ))
             }
             _ => {
                 debug_assert!(false, "Unexpected output from child process")
