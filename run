@@ -4,7 +4,7 @@ cargo check --package livemod-test
 #/
 
 #-
-PATH="$PATH:target/debug"
+PATH="target/debug:$PATH"
 cargo build --package livemod-gui
 cargo run --package livemod-test
 #/

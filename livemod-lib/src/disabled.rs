@@ -36,6 +36,7 @@ impl<T> ModVar<T> {
     }
 }
 
+#[repr(transparent)]
 pub struct StaticModVar<T> {
     value: T,
 }
@@ -48,13 +49,9 @@ impl<T> StaticModVar<T> {
     pub fn lock(&self) -> ModVarGuard<T> {
         ModVarGuard(&self.value)
     }
-
-    pub fn lock_mut(&mut self) -> ModVarMutGuard<T> {
-        ModVarMutGuard(&mut self.value)
-        //TODO: Update value in GUI
-    }
 }
 
+#[repr(transparent)]
 pub struct ModVarGuard<'a, T>(&'a T);
 
 impl<'a, T> Deref for ModVarGuard<'a, T> {
@@ -65,6 +62,7 @@ impl<'a, T> Deref for ModVarGuard<'a, T> {
     }
 }
 
+#[repr(transparent)]
 pub struct ModVarMutGuard<'a, T>(&'a mut T);
 
 impl<'a, T> Deref for ModVarMutGuard<'a, T> {

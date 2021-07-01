@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::ops::{Deref, DerefMut};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::mpsc::{self, Receiver, SyncSender};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 
 use nanoserde::{DeBin, SerBin};
@@ -13,7 +13,7 @@ use crate::{LiveMod, TrackedDataValue};
 /// A handle to an external livemod viewer.
 #[derive(Clone)]
 pub struct LiveModHandle {
-    sender: SyncSender<Message>,
+    sender: Sender<Message>,
     variables: Arc<RwLock<HashMap<String, ModVarHandle>>>,
 }
 
@@ -30,7 +30,7 @@ impl LiveModHandle {
             .stdout(Stdio::piped())
             .spawn()
             .unwrap();
-        let (sender, recv) = mpsc::sync_channel(1);
+        let (sender, recv) = mpsc::channel();
 
         let stdin = child.stdin.take().unwrap();
         let stdout = child.stdout.take().unwrap();
@@ -99,14 +99,13 @@ pub struct ModVar<T> {
     value: Box<Mutex<T>>,
 }
 
-impl<T> ModVar<T> {
+impl<T: LiveMod + 'static> ModVar<T> {
     pub fn lock(&self) -> ModVarGuard<T> {
         ModVarGuard(self.value.lock())
     }
-
+    
     pub fn lock_mut(&mut self) -> ModVarMutGuard<T> {
-        ModVarMutGuard(self.value.lock())
-        //TODO: Update value in GUI
+        ModVarMutGuard(self.value.lock(), Some(UpdateMessage::new(&self)))
     }
 }
 
@@ -127,14 +126,9 @@ impl<T> StaticModVar<T> {
             value: parking_lot::const_mutex(value)
         }
     }
-
+    
     pub fn lock(&self) -> ModVarGuard<T> {
         ModVarGuard(self.value.lock())
-    }
-
-    pub fn lock_mut(&mut self) -> ModVarMutGuard<T> {
-        ModVarMutGuard(self.value.lock())
-        //TODO: Update value in GUI
     }
 }
 
@@ -148,7 +142,7 @@ impl<'a, T> Deref for ModVarGuard<'a, T> {
     }
 }
 
-pub struct ModVarMutGuard<'a, T>(MutexGuard<'a, T>);
+pub struct ModVarMutGuard<'a, T>(MutexGuard<'a, T>, Option<UpdateMessage>);
 
 impl<'a, T> Deref for ModVarMutGuard<'a, T> {
     type Target = T;
@@ -160,7 +154,30 @@ impl<'a, T> Deref for ModVarMutGuard<'a, T> {
 
 impl<'a, T> DerefMut for ModVarMutGuard<'a, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
+        if let Some(msg) = self.1.take() {
+            msg.send();
+        }
         &mut *self.0
+    }
+}
+
+struct UpdateMessage {
+    name: String,
+    handle: ModVarHandle,
+    sender: Sender<Message>,
+}
+
+impl UpdateMessage {
+    fn new<T: LiveMod + 'static>(var: &ModVar<T>) -> UpdateMessage {
+        UpdateMessage {
+            name: var.name.clone(),
+            handle: ModVarHandle { var: &*var.value as *const _ },
+            sender: var.handle.sender.clone(),
+        }
+    }
+
+    fn send(self) {
+        self.sender.send(Message::UpdatedVariable(self.name, self.handle)).unwrap();
     }
 }
 
@@ -174,6 +191,7 @@ unsafe impl Sync for ModVarHandle {}
 
 enum Message {
     NewVariable(String, ModVarHandle),
+    UpdatedVariable(String, ModVarHandle),
 }
 
 struct ChildDropper {
@@ -195,16 +213,27 @@ fn input_thread(
         match recv.recv() {
             Ok(message) => match message {
                 Message::NewVariable(name, handle) => {
-                    let data_type = unsafe { (*handle.var).lock() }.data_type();
+                    let var = unsafe { (*handle.var).lock() };
                     writeln!(
                         input,
-                        "n{};{}",
+                        "n{};{};{}",
                         &name,
-                        base64::encode_config(data_type.serialize_bin(), base64::STANDARD_NO_PAD)
+                        base64::encode_config(var.data_type().serialize_bin(), base64::STANDARD_NO_PAD),
+                        base64::encode_config(var.get_self().serialize_bin(), base64::STANDARD_NO_PAD),
                     )
                     .unwrap();
                     variables.write().insert(name, handle);
                 }
+                Message::UpdatedVariable(name, handle) =>  {
+                    let var = unsafe { (*handle.var).lock() };
+                    writeln!(
+                        input,
+                        "u{};{}",
+                        &name,
+                        base64::encode_config(var.get_self().serialize_bin(), base64::STANDARD_NO_PAD),
+                    )
+                    .unwrap()
+                },
             },
             Err(mpsc::RecvError) => {
                 // The LiveModHandle which spawned this thread has
@@ -230,7 +259,7 @@ fn output_thread(output: ChildStdout, variables: Arc<RwLock<HashMap<String, ModV
             b's' => {
                 // Data is to be changed
                 let namespaced_name = line[2..] // Not [1..], because the first character of the name will be ':'
-                    .split(|&b| b == b':' || b == b'=')
+                    .split(|&b| b == b':' || b == b';')
                     .collect::<Vec<_>>();
                 let base = std::str::from_utf8(namespaced_name.first().unwrap()).unwrap();
                 let mut var_handle =
@@ -244,7 +273,7 @@ fn output_thread(output: ChildStdout, variables: Arc<RwLock<HashMap<String, ModV
                 var_handle.set_self(
                     TrackedDataValue::deserialize_bin(
                         &base64::decode_config(
-                            line[line.iter().position(|&b| b == b'=').unwrap() + 1..].to_owned(),
+                            line[line.iter().position(|&b| b == b';').unwrap() + 1..].to_owned(),
                             base64::STANDARD_NO_PAD,
                         )
                         .unwrap(),

@@ -41,9 +41,30 @@ fn main() {
     event_loop.run(move |event, _, control_flow| match event {
         glutin::event::Event::MainEventsCleared => {
             while let Ok(msg) = recv.try_recv() {
+                fn recursive_namespaced_insert(namespaced_name: String, value: TrackedDataValue, values: &mut Values) {
+                    match value {
+                        TrackedDataValue::SignedInt(i) => { values.i64.insert(namespaced_name, i); },
+                        TrackedDataValue::UnsignedInt(u) => { values.u64.insert(namespaced_name, u); },
+                        TrackedDataValue::Float(f) => { values.f64.insert(namespaced_name, f); },
+                        TrackedDataValue::Bool(b) => { values.bool.insert(namespaced_name, b); },
+                        TrackedDataValue::String(s) => { values.str.insert(namespaced_name, s); },
+                        TrackedDataValue::Struct(fields) => {
+                            for (field_name, field_value) in fields {
+                                let name = format!("{}:{}", namespaced_name, field_name);
+                                recursive_namespaced_insert(name, field_value, values);
+                            }
+                        },
+                        TrackedDataValue::Trigger => unimplemented!(),
+                    }
+                }
+
                 match msg {
-                    Message::NewData(name, data) => {
+                    Message::NewData(name, data, initial_value) => {
+                        recursive_namespaced_insert(format!(":{}", &name), initial_value, &mut values);
                         current_variables.insert(name, data);
+                    },
+                    Message::UpdateData(name, value) => {
+                        recursive_namespaced_insert(format!(":{}", name), value, &mut values);
                     }
                 }
             }
@@ -66,9 +87,9 @@ fn main() {
             });
 
             for (name, value) in modified_variables.drain() {
-                print!("s{}=", name);
                 println!(
-                    "{}",
+                    "s{};{}",
+                    name,
                     base64::encode_config(value.serialize_bin(), base64::STANDARD_NO_PAD)
                 );
             }
@@ -110,7 +131,7 @@ fn main() {
     });
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct Values {
     i64: HashMap<String, i64>,
     u64: HashMap<String, u64>,
@@ -120,7 +141,8 @@ struct Values {
 }
 
 enum Message {
-    NewData(String, TrackedDataRepr),
+    NewData(String, TrackedDataRepr, TrackedDataValue),
+    UpdateData(String, TrackedDataValue),
 }
 
 fn recursive_ui<'a>(
@@ -294,6 +316,14 @@ fn recursive_ui<'a>(
                     );
                 }
             }
+            TrackedDataRepr::Trigger => {
+                if ui.button(&namespaced_name).clicked() {
+                    modified_variables.insert(
+                        namespaced_name.clone(),
+                        livemod::TrackedDataValue::Trigger,
+                    );
+                }
+            }
             TrackedDataRepr::String { multiline } => {
                 if if *multiline {
                     ui.text_edit_multiline(values.str.entry(namespaced_name.clone()).or_default())
@@ -319,15 +349,31 @@ fn reader_thread(sender: Sender<Message>) {
             b'\0' => break,
             b'n' => {
                 // New variable to track
-                let (name, data) =
-                    line[1..].split_at(line[1..].iter().position(|&c| c == b';').unwrap());
+                let segments = line[1..].split(|c| *c == b';').collect::<Vec<_>>();
                 sender
                     .send(Message::NewData(
-                        String::from_utf8(name.to_owned()).unwrap(),
+                        String::from_utf8(segments[0].to_owned()).unwrap(),
                         TrackedDataRepr::deserialize_bin(
-                            &base64::decode_config(&data[1..], base64::STANDARD_NO_PAD).unwrap(),
+                            &base64::decode_config(&segments[1], base64::STANDARD_NO_PAD).unwrap(),
                         )
                         .unwrap(),
+                        TrackedDataValue::deserialize_bin(
+                            &base64::decode_config(&segments[2], base64::STANDARD_NO_PAD).unwrap()
+                        )
+                        .unwrap(),
+                    ))
+                    .unwrap();
+            }
+            b'u' => {
+                // Variable was updated
+                let segments = line[1..].split(|c| *c == b';').collect::<Vec<_>>();
+                sender
+                    .send(Message::UpdateData(
+                        String::from_utf8(segments[0].to_owned()).unwrap(),
+                        TrackedDataValue::deserialize_bin(
+                            &base64::decode_config(&segments[1], base64::STANDARD_NO_PAD).unwrap()
+                        )
+                        .unwrap()
                     ))
                     .unwrap();
             }

@@ -23,6 +23,7 @@ use nanoserde::{DeBin, SerBin};
 pub struct TrackedData {
     pub name: String,
     pub data_type: TrackedDataRepr,
+    pub modifies_structure: bool,
 }
 
 /// The representation of a tracked field
@@ -59,6 +60,7 @@ pub enum TrackedDataRepr {
         max: f64,
     },
     Bool,
+    Trigger,
     String {
         multiline: bool,
     },
@@ -75,6 +77,8 @@ pub enum TrackedDataValue {
     Float(f64),
     Bool(bool),
     String(String),
+    Struct(Vec<(String, TrackedDataValue)>),
+    Trigger,
 }
 
 impl TrackedDataValue {
@@ -127,14 +131,18 @@ pub trait LiveMod {
     fn get_named_value(&mut self, name: &str) -> &mut dyn LiveMod;
     /// If this is a value, set self to the given value
     fn set_self(&mut self, value: TrackedDataValue);
+    /// Return the current value of this data, whether it is a struct or a value
+    fn get_self(&self) -> TrackedDataValue;
 }
 
+/// Slider representation for numeric values
 pub trait Slider {
     fn repr_slider(&self, range: RangeInclusive<Self>) -> TrackedDataRepr
     where
         Self: Sized;
 }
 
+/// Multiline string input
 pub trait Multiline {
     fn repr_multiline(&self) -> TrackedDataRepr;
 }
@@ -165,6 +173,10 @@ macro_rules! unsigned_primitive_impl {
 
             fn set_self(&mut self, value: TrackedDataValue) {
                 *self = *value.as_unsigned_int().unwrap() as $ty
+            }
+
+            fn get_self(&self) -> TrackedDataValue {
+                TrackedDataValue::UnsignedInt(*self as u64)
             }
         }
 
@@ -200,6 +212,10 @@ macro_rules! signed_primitive_impl {
             fn set_self(&mut self, value: TrackedDataValue) {
                 *self = *value.as_signed_int().unwrap() as $ty
             }
+
+            fn get_self(&self) -> TrackedDataValue {
+                TrackedDataValue::SignedInt(*self as i64)
+            }
         }
 
         impl Slider for $ty {
@@ -234,6 +250,10 @@ macro_rules! float_primitive_impl {
             fn set_self(&mut self, value: TrackedDataValue) {
                 *self = *value.as_float().unwrap() as $ty
             }
+
+            fn get_self(&self) -> TrackedDataValue {
+                TrackedDataValue::Float(*self as f64)
+            }
         }
 
         impl Slider for $ty {
@@ -266,6 +286,10 @@ impl LiveMod for bool {
     fn set_self(&mut self, value: TrackedDataValue) {
         *self = *value.as_bool().unwrap()
     }
+
+    fn get_self(&self) -> TrackedDataValue {
+        TrackedDataValue::Bool(*self)
+    }
 }
 
 impl LiveMod for String {
@@ -281,6 +305,10 @@ impl LiveMod for String {
 
     fn set_self(&mut self, value: TrackedDataValue) {
         *self = value.into_string().unwrap()
+    }
+
+    fn get_self(&self) -> TrackedDataValue {
+        TrackedDataValue::String(self.clone())
     }
 }
 

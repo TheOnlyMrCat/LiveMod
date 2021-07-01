@@ -10,7 +10,7 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
         syn::Data::Struct(st) => match st.fields {
             syn::Fields::Named(fields) => {
                 let struct_name = ast.ident;
-                let (fields, matches) = fields
+                let (fields, matches_gets) = fields
                     .named
                     .into_iter()
                     .filter_map(|field| {
@@ -30,7 +30,10 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
                             Err(error) => {
                                 let ident = field.ident.unwrap();
                                 let name = ident.to_string();
-                                return Some((error.to_compile_error(), quote! { #name => &mut self.#ident }))
+                                return Some((
+                                    error.to_compile_error(),
+                                    (quote! { #name => &mut self.#ident }, quote! { (#name.to_owned(), ::livemod::LiveMod::get_self(&self.#ident)) }),
+                                ));
                             }
                         };
                         if !attrs.iter().any(|attr| matches!(attr, Attr::Skip)) {
@@ -62,18 +65,26 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
                                 quote! {
                                     ::livemod::TrackedData {
                                         name: String::from(#name),
-                                        data_type: #repr
+                                        data_type: #repr,
+                                        modifies_structure: false,
                                     }
                                 },
-                                quote! {
-                                    #name => &mut self.#ident
-                                },
+                                (
+                                    quote! {
+                                        #name => &mut self.#ident
+                                    },
+                                    quote! {
+                                        (#name.to_owned(), ::livemod::LiveMod::get_self(&self.#ident))
+                                    }
+                                )
                             ))
                         } else {
                             None
                         }
                     })
                     .unzip::<_, _, Vec<_>, Vec<_>>();
+
+                let (matches, gets) = matches_gets.into_iter().unzip::<_, _, Vec<_>, Vec<_>>();
                 let gen = quote! {
                     #[automatically_derived]
                     impl ::livemod::LiveMod for #struct_name {
@@ -82,7 +93,7 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
                                 name: String::from(stringify!(#struct_name)),
                                 fields: vec![
                                     #(#fields),*
-                                ]
+                                ],
                             }
                         }
 
@@ -95,6 +106,12 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
 
                         fn set_self(&mut self, value: ::livemod::TrackedDataValue) {
                             panic!("Unexpected set operation!")
+                        }
+
+                        fn get_self(&self) -> ::livemod::TrackedDataValue {
+                            ::livemod::TrackedDataValue::Struct(vec![
+                                #(#gets),*
+                            ])
                         }
                     }
                 };

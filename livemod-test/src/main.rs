@@ -2,7 +2,7 @@ use livemod::{LiveMod, LiveModHandle, Multiline, Slider, TrackedDataRepr, Tracke
 
 livemod_static! {
     static STRAIGHT_VALUE: f32 = 0.0;
-    static NON_DERIVED: Data = Data { value: 0 };
+    static NON_DERIVED: Data = Data { value: 64 };
 }
 
 fn main() {
@@ -10,7 +10,7 @@ fn main() {
 
     livemod.track_variable("Float", &STRAIGHT_VALUE);
     livemod.track_variable("Non-derived", &NON_DERIVED);
-    let derived = livemod.create_variable("Derived", DerivedData::default());
+    let mut derived = livemod.create_variable("Derived", DerivedData::default());
 
     let mut prev_float = *STRAIGHT_VALUE.lock();
     let mut prev_nonderived = NON_DERIVED.lock().value;
@@ -21,7 +21,7 @@ fn main() {
     loop {
         let cur_float = *STRAIGHT_VALUE.lock();
         let cur_nonderived = NON_DERIVED.lock().value;
-        let cur_derived = derived.lock().clone();
+        let mut cur_derived = derived.lock_mut();
         if cur_float != prev_float {
             println!("Float: {}", cur_float);
             prev_float = cur_float;
@@ -30,14 +30,16 @@ fn main() {
             println!("Non-derived: {}", cur_nonderived);
             prev_nonderived = cur_nonderived;
         }
-        if cur_derived != prev_derived {
-            println!("Derived: {:?}", cur_derived);
-            prev_derived = cur_derived;
+        if *cur_derived != prev_derived {
+            println!("Derived: {:?}", *cur_derived);
+            prev_derived = cur_derived.clone();
+            if cur_derived.floating_point != 3.2 {
+                cur_derived.floating_point = 3.2;
+            }
         }
     }
 }
 
-#[derive(Default)]
 struct Data {
     value: u32,
 }
@@ -59,9 +61,13 @@ impl LiveMod for Data {
     fn set_self(&mut self, value: TrackedDataValue) {
         self.value = *value.as_unsigned_int().unwrap() as u32;
     }
+
+    fn get_self(&self) -> TrackedDataValue {
+        TrackedDataValue::UnsignedInt(self.value as u64)
+    }
 }
 
-#[derive(Default, Debug, LiveMod, PartialEq, Clone)]
+#[derive(Debug, LiveMod, PartialEq, Clone)]
 struct DerivedData {
     #[livemod(repr = Slider(0..=500))]
     value_1: u32,
@@ -76,4 +82,19 @@ struct DerivedData {
     singleline_string: String,
     #[livemod(repr = Multiline)]
     multiline_string: String,
+}
+
+impl Default for DerivedData {
+    fn default() -> Self {
+        DerivedData {
+            value_1: 1,
+            value_2: 2,
+            floating_point: 3.2,
+            double_float: 6.4,
+            runtime_flag: false,
+            toggleable_flag: true,
+            singleline_string: "One line".to_owned(),
+            multiline_string: "Multiple\nlines".to_owned(),
+        }
+    }
 }
