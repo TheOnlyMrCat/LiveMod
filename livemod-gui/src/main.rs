@@ -34,7 +34,7 @@ fn main() {
     let mut egui = egui_glium::EguiGlium::new(&display);
 
     let mut cached_shapes = None;
-    let mut current_variables = HashMap::new();
+    let mut current_variables = Vec::new();
     let mut values = Values::default();
     let mut modified_variables = HashMap::new();
 
@@ -79,10 +79,13 @@ fn main() {
                             initial_value,
                             &mut values,
                         );
-                        current_variables.insert(name, data);
+                        current_variables.push((name, data));
                     }
                     Message::UpdateData(name, value) => {
                         recursive_namespaced_insert(format!(":{}", name), value, &mut values);
+                    }
+                    Message::RemoveData(name) => {
+                        current_variables.remove(current_variables.iter().position(|(n, _)| name == *n).unwrap());
                     }
                 }
             }
@@ -161,6 +164,7 @@ struct Values {
 enum Message {
     NewData(String, TrackedDataRepr, TrackedDataValue),
     UpdateData(String, TrackedDataValue),
+    RemoveData(String),
 }
 
 fn recursive_ui<'a>(
@@ -377,11 +381,11 @@ fn reader_thread(sender: Sender<Message>) {
     for line in BufReader::new(std::io::stdin()).lines() {
         let line = line.unwrap();
         let line = line.as_bytes();
+        let segments = line[1..].split(|c| *c == b';').collect::<Vec<_>>();
         match line[0] {
             b'\0' => break,
             b'n' => {
                 // New variable to track
-                let segments = line[1..].split(|c| *c == b';').collect::<Vec<_>>();
                 sender
                     .send(Message::NewData(
                         String::from_utf8(segments[0].to_owned()).unwrap(),
@@ -398,7 +402,6 @@ fn reader_thread(sender: Sender<Message>) {
             }
             b'u' => {
                 // Variable was updated
-                let segments = line[1..].split(|c| *c == b';').collect::<Vec<_>>();
                 sender
                     .send(Message::UpdateData(
                         String::from_utf8(segments[0].to_owned()).unwrap(),
@@ -408,6 +411,10 @@ fn reader_thread(sender: Sender<Message>) {
                         .unwrap(),
                     ))
                     .unwrap();
+            }
+            b'r' => {
+                // Variable was dropped
+                sender.send(Message::RemoveData(String::from_utf8(segments[0].to_owned()).unwrap())).unwrap()
             }
             _ => {
                 debug_assert!(false, "Unexpected input")

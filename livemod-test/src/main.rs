@@ -14,6 +14,7 @@ fn main() {
     livemod.track_variable("Float", &STRAIGHT_VALUE);
     livemod.track_variable("Non-derived", &NON_DERIVED);
     let mut derived = livemod.create_variable("Derived", DerivedData::default());
+    let mut can_remove = Some(livemod.create_variable("Remove", false));
 
     let mut prev_float = *STRAIGHT_VALUE.lock();
     let mut prev_nonderived = NON_DERIVED.lock().value;
@@ -38,6 +39,14 @@ fn main() {
             prev_derived = cur_derived.clone();
             if cur_derived.floating_point != 3.2 {
                 cur_derived.floating_point = 3.2;
+            }
+        }
+        if let Some(r) = can_remove {
+            if *r.lock() {
+                can_remove = None;
+                println!("Checkbox removed");
+            } else {
+                can_remove = Some(r);
             }
         }
     }

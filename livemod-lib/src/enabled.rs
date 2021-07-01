@@ -113,6 +113,7 @@ impl<T: LiveMod + 'static> ModVar<T> {
 
 impl<T> Drop for ModVar<T> {
     fn drop(&mut self) {
+        self.handle.sender.send(Message::RemoveVariable(self.name.clone())).unwrap();
         self.handle.variables.write().remove(&self.name);
     }
 }
@@ -198,6 +199,7 @@ unsafe impl Sync for ModVarHandle {}
 enum Message {
     NewVariable(String, ModVarHandle),
     UpdatedVariable(String, ModVarHandle),
+    RemoveVariable(String),
 }
 
 struct ChildDropper {
@@ -247,7 +249,15 @@ fn input_thread(
                             base64::STANDARD_NO_PAD
                         ),
                     )
-                    .unwrap()
+                    .unwrap();
+                }
+                Message::RemoveVariable(name) => {
+                    writeln!(
+                        input,
+                        "r{}",
+                        &name
+                    )
+                    .unwrap();
                 }
             },
             Err(mpsc::RecvError) => {
