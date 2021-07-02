@@ -60,7 +60,9 @@ pub enum TrackedDataRepr {
         max: f64,
     },
     Bool,
-    Trigger,
+    Trigger {
+        name: String,
+    },
     String {
         multiline: bool,
     },
@@ -337,5 +339,35 @@ impl LiveMod for String {
 impl Multiline for String {
     fn repr_multiline(&self) -> TrackedDataRepr {
         TrackedDataRepr::String { multiline: true }
+    }
+}
+
+pub struct TriggerFn<A, F: FnMut(&mut A)> {
+    arg: A,
+    func: F,
+}
+
+impl<A, F: FnMut(&mut A)> TriggerFn<A, F> {
+    pub fn new(arg: A, func: F) -> TriggerFn<A, F> {
+        TriggerFn { arg, func }
+    }
+}
+
+impl<A, F: FnMut(&mut A)> LiveMod for TriggerFn<A, F> {
+    fn data_type(&self) -> TrackedDataRepr {
+        TrackedDataRepr::Trigger { name: "Call".to_owned() }
+    }
+
+    fn get_named_value(&mut self, _name: &str) -> &mut dyn LiveMod {
+        unimplemented!()
+    }
+
+    fn trigger(&mut self, trigger: Trigger) {
+        trigger.try_into_trigger().unwrap();
+        (self.func)(&mut self.arg)
+    }
+
+    fn get_self(&self) -> TrackedDataValue {
+        TrackedDataValue::Trigger
     }
 }

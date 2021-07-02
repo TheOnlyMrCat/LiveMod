@@ -36,7 +36,7 @@ fn main() {
     let mut cached_shapes = None;
     let mut current_variables = Vec::new();
     let mut values = Values::default();
-    let mut modified_variables = HashMap::new();
+    let mut modified_variables = Vec::new();
 
     event_loop.run(move |event, _, control_flow| match event {
         glutin::event::Event::MainEventsCleared => {
@@ -68,7 +68,7 @@ fn main() {
                                 recursive_namespaced_insert(name, field_value, values);
                             }
                         }
-                        TrackedDataValue::Trigger => unimplemented!(),
+                        TrackedDataValue::Trigger => {},
                     }
                 }
 
@@ -107,12 +107,19 @@ fn main() {
                     });
             });
 
-            for (name, value) in modified_variables.drain() {
-                println!(
-                    "s{};{}",
-                    name,
-                    base64::encode_config(value.serialize_bin(), base64::STANDARD_NO_PAD)
-                );
+            for (name, value) in modified_variables.drain(..) {
+                if let TrackedDataValue::Trigger = value {
+                    println!(
+                        "t{}",
+                        name,
+                    )
+                } else {
+                    println!(
+                        "s{};{}",
+                        name,
+                        base64::encode_config(value.serialize_bin(), base64::STANDARD_NO_PAD)
+                    );
+                }
             }
 
             let (needs_repaint, shapes) = egui.end_frame(&display);
@@ -170,7 +177,7 @@ enum Message {
 fn recursive_ui<'a>(
     ui: &mut egui::Ui,
     values: &mut Values,
-    modified_variables: &mut HashMap<String, TrackedDataValue>,
+    modified_variables: &mut Vec<(String, TrackedDataValue)>,
     variables: impl Iterator<Item = (String, &'a TrackedDataRepr)>,
     namespace: String,
 ) {
@@ -214,10 +221,10 @@ fn recursive_ui<'a>(
                                     (val as i64).clamp(*storage_min, *storage_max),
                                 );
                                 let v = values.i64.get(&namespaced_name).unwrap();
-                                modified_variables.insert(
+                                modified_variables.push((
                                     namespaced_name.clone(),
                                     livemod::TrackedDataValue::SignedInt(*v),
-                                );
+                                ));
                                 v
                             }
                             None => values.i64.entry(namespaced_name.clone()).or_default(),
@@ -242,10 +249,10 @@ fn recursive_ui<'a>(
                                     (val as u64).clamp(*storage_min, *storage_max),
                                 );
                                 let v = values.u64.get(&namespaced_name).unwrap();
-                                modified_variables.insert(
+                                modified_variables.push((
                                     namespaced_name.clone(),
                                     livemod::TrackedDataValue::UnsignedInt(*v),
-                                );
+                                ));
                                 v
                             }
                             None => values.u64.entry(namespaced_name.clone()).or_default(),
@@ -269,10 +276,10 @@ fn recursive_ui<'a>(
                                 val.clamp(*storage_min, *storage_max),
                             );
                             let v = values.f64.get(&namespaced_name).unwrap();
-                            modified_variables.insert(
+                            modified_variables.push((
                                 namespaced_name.clone(),
                                 livemod::TrackedDataValue::Float(*v),
-                            );
+                            ));
                             v
                         }
                         None => values.f64.entry(namespaced_name.clone()).or_default(),
@@ -289,12 +296,12 @@ fn recursive_ui<'a>(
                     )
                     .changed()
                 {
-                    modified_variables.insert(
+                    modified_variables.push((
                         namespaced_name.clone(),
                         livemod::TrackedDataValue::SignedInt(
                             *values.i64.entry(namespaced_name.clone()).or_default(),
                         ),
-                    );
+                    ));
                 }
             }
             TrackedDataRepr::UnsignedInteger { min, max } => {
@@ -307,12 +314,12 @@ fn recursive_ui<'a>(
                     )
                     .changed()
                 {
-                    modified_variables.insert(
+                    modified_variables.push((
                         namespaced_name.clone(),
                         livemod::TrackedDataValue::UnsignedInt(
                             *values.u64.entry(namespaced_name.clone()).or_default(),
                         ),
-                    );
+                    ));
                 }
             }
             TrackedDataRepr::Float { min, max } => {
@@ -325,12 +332,12 @@ fn recursive_ui<'a>(
                     )
                     .changed()
                 {
-                    modified_variables.insert(
+                    modified_variables.push((
                         namespaced_name.clone(),
                         livemod::TrackedDataValue::Float(
                             *values.f64.entry(namespaced_name.clone()).or_default(),
                         ),
-                    );
+                    ));
                 }
             }
             TrackedDataRepr::Bool => {
@@ -338,18 +345,18 @@ fn recursive_ui<'a>(
                     .checkbox(values.bool.entry(namespaced_name.clone()).or_default(), "")
                     .changed()
                 {
-                    modified_variables.insert(
+                    modified_variables.push((
                         namespaced_name.clone(),
                         livemod::TrackedDataValue::Bool(
                             *values.bool.entry(namespaced_name.clone()).or_default(),
                         ),
-                    );
+                    ));
                 }
             }
-            TrackedDataRepr::Trigger => {
-                if ui.button(&namespaced_name).clicked() {
+            TrackedDataRepr::Trigger { name } => {
+                if ui.button(&name).clicked() {
                     modified_variables
-                        .insert(namespaced_name.clone(), livemod::TrackedDataValue::Trigger);
+                        .push((format!("{}:{}", namespaced_name.clone(), name), livemod::TrackedDataValue::Trigger));
                 }
             }
             TrackedDataRepr::String { multiline } => {
@@ -360,7 +367,7 @@ fn recursive_ui<'a>(
                 }
                 .changed()
                 {
-                    modified_variables.insert(
+                    modified_variables.push((
                         namespaced_name.clone(),
                         livemod::TrackedDataValue::String(
                             values
@@ -369,7 +376,7 @@ fn recursive_ui<'a>(
                                 .or_default()
                                 .clone(),
                         ),
-                    );
+                    ));
                 }
             }
         }

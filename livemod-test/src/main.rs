@@ -1,6 +1,6 @@
 use livemod::{
     livemod_static, LiveMod, LiveModHandle, Multiline, Slider, TrackedDataRepr, TrackedDataValue,
-    Trigger,
+    Trigger, TriggerFn,
 };
 
 livemod_static! {
@@ -14,7 +14,9 @@ fn main() {
     livemod.track_variable("Float", &STRAIGHT_VALUE);
     livemod.track_variable("Non-derived", &NON_DERIVED);
     let mut derived = livemod.create_variable("Derived", DerivedData::default());
-    let mut can_remove = Some(livemod.create_variable("Remove", false));
+    let mut can_remove = Some(livemod.create_variable("Remove me", false));
+    let _trigger =
+        livemod.create_variable("Trigger", TriggerFn::new((), |()| println!("Triggered!")));
 
     let mut prev_float = *STRAIGHT_VALUE.lock();
     let mut prev_nonderived = NON_DERIVED.lock().value;

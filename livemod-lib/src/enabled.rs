@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::ops::{Deref, DerefMut};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::ptr::NonNull;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 
@@ -63,9 +64,9 @@ impl LiveModHandle {
         }
     }
 
-    pub fn track_variable<T: 'static + LiveMod>(&self, name: &str, var: &'static StaticModVar<T>) {
+    pub fn track_variable<T: LiveMod + 'static>(&self, name: &str, var: &'static StaticModVar<T>) {
         let var_handle = ModVarHandle {
-            var: &var.value as *const _,
+            var: NonNull::from(&var.value),
         };
         self.sender
             .send(Message::NewVariable(name.to_owned(), var_handle))
@@ -73,16 +74,14 @@ impl LiveModHandle {
     }
 
     /// Create a variable and send it to the external viewer to be tracked.
-    ///
-    /// TODO: Remove the variable from the external viewer when dropped
-    pub fn create_variable<T: 'static + LiveMod>(&self, name: &str, var: T) -> ModVar<T> {
+    pub fn create_variable<T: LiveMod + 'static>(&self, name: &str, var: T) -> ModVar<T> {
         let mod_var = ModVar {
             name: name.to_owned(),
             handle: self.clone(),
             value: Box::new(Mutex::new(var)),
         };
         let var_handle = ModVarHandle {
-            var: &*mod_var.value as *const _,
+            var: NonNull::from(&*mod_var.value),
         };
         self.sender
             .send(Message::NewVariable(name.to_owned(), var_handle))
@@ -113,7 +112,10 @@ impl<T: LiveMod + 'static> ModVar<T> {
 
 impl<T> Drop for ModVar<T> {
     fn drop(&mut self) {
-        self.handle.sender.send(Message::RemoveVariable(self.name.clone())).unwrap();
+        self.handle
+            .sender
+            .send(Message::RemoveVariable(self.name.clone()))
+            .unwrap();
         self.handle.variables.write().remove(&self.name);
     }
 }
@@ -175,7 +177,7 @@ impl UpdateMessage {
         UpdateMessage {
             name: var.name.clone(),
             handle: ModVarHandle {
-                var: &*var.value as *const _,
+                var: NonNull::from(&*var.value),
             },
             sender: var.handle.sender.clone(),
         }
@@ -190,7 +192,7 @@ impl UpdateMessage {
 
 #[derive(Clone, Copy)]
 struct ModVarHandle {
-    var: *const Mutex<dyn LiveMod>,
+    var: NonNull<Mutex<dyn LiveMod>>,
 }
 
 unsafe impl Send for ModVarHandle {}
@@ -221,7 +223,7 @@ fn input_thread(
         match recv.recv() {
             Ok(message) => match message {
                 Message::NewVariable(name, handle) => {
-                    let var = unsafe { (*handle.var).lock() };
+                    let var = unsafe { handle.var.as_ref() }.lock();
                     writeln!(
                         input,
                         "n{};{};{}",
@@ -239,7 +241,7 @@ fn input_thread(
                     variables.write().insert(name, handle);
                 }
                 Message::UpdatedVariable(name, handle) => {
-                    let var = unsafe { (*handle.var).lock() };
+                    let var = unsafe { handle.var.as_ref() }.lock();
                     writeln!(
                         input,
                         "u{};{}",
@@ -252,12 +254,7 @@ fn input_thread(
                     .unwrap();
                 }
                 Message::RemoveVariable(name) => {
-                    writeln!(
-                        input,
-                        "r{}",
-                        &name
-                    )
-                    .unwrap();
+                    writeln!(input, "r{}", &name).unwrap();
                 }
             },
             Err(mpsc::RecvError) => {
@@ -286,15 +283,21 @@ fn output_thread(output: ChildStdout, variables: Arc<RwLock<HashMap<String, ModV
                 let namespaced_name = line[2..] // Not [1..], because the first character of the name will be ':'
                     .split(|&b| b == b':' || b == b';')
                     .collect::<Vec<_>>();
+                
+                // Get the 'base' variable from our HashMap
                 let base = std::str::from_utf8(namespaced_name.first().unwrap()).unwrap();
                 let mut var_handle =
-                    unsafe { &mut *(*variables.read().get(base).unwrap().var).lock() };
+                unsafe { &mut *variables.read().get(base).unwrap().var.as_ref().lock() };
+
+                // Follow the 'path' of field names, if needed
                 if namespaced_name.len() > 2 {
                     for name in &namespaced_name[1..=namespaced_name.len() - 2] {
                         let name = std::str::from_utf8(name).unwrap();
                         var_handle = var_handle.get_named_value(name);
                     }
                 }
+
+                // Set the variable
                 var_handle.trigger(Trigger::Set(
                     TrackedDataValue::deserialize_bin(
                         &base64::decode_config(
@@ -305,6 +308,28 @@ fn output_thread(output: ChildStdout, variables: Arc<RwLock<HashMap<String, ModV
                     )
                     .unwrap(),
                 ))
+            }
+            b't' => {
+                // A trigger on an object
+                let namespaced_name = line[2..] // Not [1..], because the first character of the name will be ':'
+                    .split(|&b| b == b':')
+                    .collect::<Vec<_>>();
+
+                // Get the 'base' variable from our HashMap
+                let base = std::str::from_utf8(namespaced_name.first().unwrap()).unwrap();
+                let mut var_handle =
+                unsafe { &mut *variables.read().get(base).unwrap().var.as_ref().lock() };
+
+                // Follow the 'path' of field names, if needed, ignoring the last element of the name
+                if namespaced_name.len() > 2 {
+                    for name in &namespaced_name[1..=namespaced_name.len() - 2] {
+                        let name = std::str::from_utf8(name).unwrap();
+                        var_handle = var_handle.get_named_value(name);
+                    }
+                }
+
+                // Trigger the action denoted by the last element of the name
+                var_handle.trigger(Trigger::Trigger(String::from_utf8((*namespaced_name.last().unwrap()).to_owned()).unwrap()))
             }
             _ => {
                 debug_assert!(false, "Unexpected output from child process")
