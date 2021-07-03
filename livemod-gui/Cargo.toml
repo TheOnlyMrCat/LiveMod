@@ -6,7 +6,7 @@ readme = "../README.md"
 repository = "https://github.com/TheOnlyMrCat/LiveMod"
 categories = ["development-tools::debugging", "game-development"]
 license = "MIT OR Apache-2.0"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2018"
 
 [dependencies]
@@ -15,4 +15,4 @@ egui_glium = "0.12.0"
 glium = "0.29.1"
 base64 = "0.13"
 nanoserde = "0.1"
-livemod = { path = "../livemod-lib", version = "0.2" }
+livemod = { path = "../livemod-lib", version = "0.3" }
