@@ -16,7 +16,7 @@ impl LiveModHandle {
 
     pub fn track_variable<T: 'static + LiveMod>(&self, _: &str, _: &'static StaticModVar<T>) {}
 
-    pub fn create_variable<T: 'static + LiveMod>(&self, _: &str, var: T) -> ModVar<T> {
+    pub fn create_variable<'a, T: 'a + LiveMod>(&self, _: &str, var: T) -> ModVar<T> {
         ModVar { value: var }
     }
 }

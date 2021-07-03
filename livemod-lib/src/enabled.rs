@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
+use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::ptr::NonNull;
@@ -44,7 +45,6 @@ impl LiveModHandle {
         let variables_arc2 = variables_arc1.clone();
         let variables_arc3 = variables_arc1.clone();
 
-
         std::thread::Builder::new()
             .name("livemod_input".to_owned())
             .spawn(|| {
@@ -76,14 +76,19 @@ impl LiveModHandle {
     }
 
     /// Create a variable and send it to the external viewer to be tracked.
-    pub fn create_variable<T: LiveMod + 'static>(&self, name: &str, var: T) -> ModVar<T> {
+    pub fn create_variable<'a, T: LiveMod + 'a>(&self, name: &str, var: T) -> ModVar<T> {
         let mod_var = ModVar {
             name: name.to_owned(),
             handle: self.clone(),
             value: Box::new(Mutex::new(var)),
         };
         let var_handle = ModVarHandle {
-            var: NonNull::from(&*mod_var.value),
+            var: unsafe {
+                // SAFETY: The handle is explicitly removed as soon as it goes out of scope
+                std::mem::transmute::<NonNull<Mutex<dyn LiveMod + 'a>>, NonNull<Mutex<dyn LiveMod + 'static>>>(
+                    NonNull::from(&*mod_var.value),
+                )
+            },
         };
         self.sender
             .send(Message::NewVariable(name.to_owned(), var_handle))
@@ -102,13 +107,13 @@ pub struct ModVar<T> {
     value: Box<Mutex<T>>,
 }
 
-impl<T: LiveMod + 'static> ModVar<T> {
+impl<T: LiveMod> ModVar<T> {
     pub fn lock(&self) -> ModVarGuard<T> {
         ModVarGuard(self.value.lock())
     }
 
     pub fn lock_mut(&mut self) -> ModVarMutGuard<T> {
-        ModVarMutGuard(self.value.lock(), Some(UpdateMessage::new(&self)))
+        ModVarMutGuard(self.value.lock(), Some(UpdateMessage::new(self)))
     }
 }
 
@@ -149,7 +154,7 @@ impl<'a, T> Deref for ModVarGuard<'a, T> {
     }
 }
 
-pub struct ModVarMutGuard<'a, T>(MutexGuard<'a, T>, Option<UpdateMessage>);
+pub struct ModVarMutGuard<'a, T>(MutexGuard<'a, T>, Option<UpdateMessage<'a>>);
 
 impl<'a, T> Deref for ModVarMutGuard<'a, T> {
     type Target = T;
@@ -168,20 +173,27 @@ impl<'a, T> DerefMut for ModVarMutGuard<'a, T> {
     }
 }
 
-struct UpdateMessage {
+struct UpdateMessage<'a> {
     name: String,
     handle: ModVarHandle,
     sender: Sender<Message>,
+    _marker: PhantomData<&'a ModVarHandle>,
 }
 
-impl UpdateMessage {
-    fn new<T: LiveMod + 'static>(var: &ModVar<T>) -> UpdateMessage {
+impl UpdateMessage<'_> {
+    fn new<'a, T: LiveMod + 'a>(var: &'a ModVar<T>) -> UpdateMessage<'a> {
         UpdateMessage {
             name: var.name.clone(),
             handle: ModVarHandle {
-                var: NonNull::from(&*var.value),
+                var: unsafe {
+                    // SAFETY: The value lives as long as the ModVar which we are borrowing
+                    std::mem::transmute::<NonNull<Mutex<dyn LiveMod + 'a>>, NonNull<Mutex<dyn LiveMod + 'static>>>(
+                        NonNull::from(&*var.value),
+                    )
+                },
             },
             sender: var.handle.sender.clone(),
+            _marker: std::marker::PhantomData,
         }
     }
 
@@ -272,7 +284,9 @@ fn input_thread(
                     writeln!(
                         input,
                         "u{};{};{}",
-                        path.into_iter().reduce(|acc, v| format!("{}:{}", acc, v)).unwrap(),
+                        path.into_iter()
+                            .reduce(|acc, v| format!("{}:{}", acc, v))
+                            .unwrap(),
                         base64::encode_config(
                             var_handle.repr_default().serialize_bin(),
                             base64::STANDARD_NO_PAD
@@ -280,7 +294,7 @@ fn input_thread(
                         base64::encode_config(
                             var_handle.get_self().serialize_bin(),
                             base64::STANDARD_NO_PAD
-                        ),                       
+                        ),
                     )
                     .unwrap();
                 }
@@ -344,7 +358,11 @@ fn output_thread(
                     )
                     .unwrap(),
                 )) {
-                    sender.send(Message::UpdatedRepr(namespaced_name.into_iter().map(str::to_owned).collect())).unwrap();
+                    sender
+                        .send(Message::UpdatedRepr(
+                            namespaced_name.into_iter().map(str::to_owned).collect(),
+                        ))
+                        .unwrap();
                 }
             }
             b't' => {
@@ -372,7 +390,15 @@ fn output_thread(
                     (*namespaced_name.last().unwrap()).to_owned(),
                 )) {
                     let len = namespaced_name.len() - 1;
-                    sender.send(Message::UpdatedRepr(namespaced_name.into_iter().take(len).map(str::to_owned).collect())).unwrap();
+                    sender
+                        .send(Message::UpdatedRepr(
+                            namespaced_name
+                                .into_iter()
+                                .take(len)
+                                .map(str::to_owned)
+                                .collect(),
+                        ))
+                        .unwrap();
                 }
             }
             _ => {

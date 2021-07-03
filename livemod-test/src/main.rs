@@ -1,4 +1,4 @@
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use livemod::{
     livemod_static, LiveMod, LiveModHandle, Multiline, Slider, TrackedDataRepr, TrackedDataValue,
@@ -18,9 +18,11 @@ fn main() {
     let mut derived = livemod.create_variable("Derived", DerivedData::default());
     let mut can_remove = Some(livemod.create_variable("Remove me", false));
     let _vector = livemod.create_variable("Vector", vec![6.4, 8.2]);
-    let (send, recv) = mpsc::channel();
-    let _trigger =
-        livemod.create_variable("Exit", TriggerFn::new((), move |()| send.send(()).unwrap()));
+    let running = AtomicBool::new(true);
+    let _trigger = livemod.create_variable(
+        "Exit",
+        TriggerFn::new((), |()| running.store(false, Ordering::Relaxed)),
+    );
 
     let mut prev_float = *STRAIGHT_VALUE.lock();
     let mut prev_nonderived = NON_DERIVED.lock().value;
@@ -28,7 +30,7 @@ fn main() {
     println!("Float: {}", prev_float);
     println!("Non-derived: {}", prev_nonderived);
     println!("Derived: {:?}", prev_derived);
-    while let Err(_) = recv.try_recv() {
+    while running.load(Ordering::Relaxed) {
         let cur_float = *STRAIGHT_VALUE.lock();
         let cur_nonderived = NON_DERIVED.lock().value;
         let mut cur_derived = derived.lock_mut();
