@@ -139,7 +139,7 @@ impl Parse for Attr {
         let attr_type: Ident = input.parse()?;
         if attr_type == "skip" {
             if !input.is_empty() {
-                Err(input.error("Expected end of attribute content"))?;
+                return Err(input.error("Expected end of attribute content"));
             }
             Ok(Attr::Skip)
         } else if attr_type == "rename" {

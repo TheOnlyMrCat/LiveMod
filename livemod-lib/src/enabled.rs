@@ -85,9 +85,10 @@ impl LiveModHandle {
         let var_handle = ModVarHandle {
             var: unsafe {
                 // SAFETY: The handle is explicitly removed as soon as it goes out of scope
-                std::mem::transmute::<NonNull<Mutex<dyn LiveMod + 'a>>, NonNull<Mutex<dyn LiveMod + 'static>>>(
-                    NonNull::from(&*mod_var.value),
-                )
+                std::mem::transmute::<
+                    NonNull<Mutex<dyn LiveMod + 'a>>,
+                    NonNull<Mutex<dyn LiveMod + 'static>>,
+                >(NonNull::from(&*mod_var.value))
             },
         };
         self.sender
@@ -187,9 +188,10 @@ impl UpdateMessage<'_> {
             handle: ModVarHandle {
                 var: unsafe {
                     // SAFETY: The value lives as long as the ModVar which we are borrowing
-                    std::mem::transmute::<NonNull<Mutex<dyn LiveMod + 'a>>, NonNull<Mutex<dyn LiveMod + 'static>>>(
-                        NonNull::from(&*var.value),
-                    )
+                    std::mem::transmute::<
+                        NonNull<Mutex<dyn LiveMod + 'a>>,
+                        NonNull<Mutex<dyn LiveMod + 'static>>,
+                    >(NonNull::from(&*var.value))
                 },
             },
             sender: var.handle.sender.clone(),
@@ -234,78 +236,65 @@ fn input_thread(
     recv: Receiver<Message>,
     variables: Arc<RwLock<HashMap<String, ModVarHandle>>>,
 ) {
-    loop {
-        match recv.recv() {
-            Ok(message) => match message {
-                Message::NewVariable(name, handle) => {
-                    let var = unsafe { handle.var.as_ref() }.lock();
-                    writeln!(
-                        input,
-                        "n{};{};{}",
-                        &name,
-                        base64::encode_config(
-                            var.repr_default().serialize_bin(),
-                            base64::STANDARD_NO_PAD
-                        ),
-                        base64::encode_config(
-                            var.get_self().serialize_bin(),
-                            base64::STANDARD_NO_PAD
-                        ),
-                    )
-                    .unwrap();
-                    variables.write().insert(name, handle);
-                }
-                Message::UpdatedVariable(name, handle) => {
-                    let var = unsafe { handle.var.as_ref() }.lock();
-                    writeln!(
-                        input,
-                        "s{};{}",
-                        &name,
-                        base64::encode_config(
-                            var.get_self().serialize_bin(),
-                            base64::STANDARD_NO_PAD
-                        ),
-                    )
-                    .unwrap();
-                }
-                Message::UpdatedRepr(path) => {
-                    // Get the 'base' variable from our HashMap
-                    let base = path.first().unwrap();
-                    let mut var_handle =
-                        unsafe { &mut *variables.read().get(base).unwrap().var.as_ref().lock() };
+    while let Ok(message) = recv.recv() {
+        match message {
+            Message::NewVariable(name, handle) => {
+                let var = unsafe { handle.var.as_ref() }.lock();
+                writeln!(
+                    input,
+                    "n{};{};{}",
+                    &name,
+                    base64::encode_config(
+                        var.repr_default().serialize_bin(),
+                        base64::STANDARD_NO_PAD
+                    ),
+                    base64::encode_config(var.get_self().serialize_bin(), base64::STANDARD_NO_PAD),
+                )
+                .unwrap();
+                variables.write().insert(name, handle);
+            }
+            Message::UpdatedVariable(name, handle) => {
+                let var = unsafe { handle.var.as_ref() }.lock();
+                writeln!(
+                    input,
+                    "s{};{}",
+                    &name,
+                    base64::encode_config(var.get_self().serialize_bin(), base64::STANDARD_NO_PAD),
+                )
+                .unwrap();
+            }
+            Message::UpdatedRepr(path) => {
+                // Get the 'base' variable from our HashMap
+                let base = path.first().unwrap();
+                let mut var_handle =
+                    unsafe { &mut *variables.read().get(base).unwrap().var.as_ref().lock() };
 
-                    // Follow the 'path' of field names, if needed
-                    if path.len() > 2 {
-                        for name in &path[1..=path.len() - 2] {
-                            var_handle = var_handle.get_named_value(name);
-                        }
+                // Follow the 'path' of field names, if needed
+                if path.len() > 2 {
+                    for name in &path[1..=path.len() - 2] {
+                        var_handle = var_handle.get_named_value(name);
                     }
+                }
 
-                    writeln!(
-                        input,
-                        "u{};{};{}",
-                        path.into_iter()
-                            .reduce(|acc, v| format!("{}:{}", acc, v))
-                            .unwrap(),
-                        base64::encode_config(
-                            var_handle.repr_default().serialize_bin(),
-                            base64::STANDARD_NO_PAD
-                        ),
-                        base64::encode_config(
-                            var_handle.get_self().serialize_bin(),
-                            base64::STANDARD_NO_PAD
-                        ),
-                    )
-                    .unwrap();
-                }
-                Message::RemoveVariable(name) => {
-                    writeln!(input, "r{}", &name).unwrap();
-                }
-            },
-            Err(mpsc::RecvError) => {
-                // The LiveModHandle which spawned this thread has
-                // been destroyed, so quit and clean up now.
-                break;
+                writeln!(
+                    input,
+                    "u{};{};{}",
+                    path.into_iter()
+                        .reduce(|acc, v| format!("{}:{}", acc, v))
+                        .unwrap(),
+                    base64::encode_config(
+                        var_handle.repr_default().serialize_bin(),
+                        base64::STANDARD_NO_PAD
+                    ),
+                    base64::encode_config(
+                        var_handle.get_self().serialize_bin(),
+                        base64::STANDARD_NO_PAD
+                    ),
+                )
+                .unwrap();
+            }
+            Message::RemoveVariable(name) => {
+                writeln!(input, "r{}", &name).unwrap();
             }
         }
     }

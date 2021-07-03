@@ -34,6 +34,7 @@ fn main() {
         let cur_float = *STRAIGHT_VALUE.lock();
         let cur_nonderived = NON_DERIVED.lock().value;
         let mut cur_derived = derived.lock_mut();
+        #[allow(clippy::float_cmp)]
         if cur_float != prev_float {
             println!("Float: {}", cur_float);
             prev_float = cur_float;
@@ -45,6 +46,7 @@ fn main() {
         if *cur_derived != prev_derived {
             println!("Derived: {:?}", *cur_derived);
             prev_derived = cur_derived.clone();
+            #[allow(clippy::float_cmp)]
             if cur_derived.floating_point != 3.2 {
                 cur_derived.floating_point = 3.2;
             }

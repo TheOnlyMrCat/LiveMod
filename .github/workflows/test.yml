@@ -44,7 +44,7 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: fmt
-          args: --workspace --exclude livemod-gui -- --check
+          args: --all --exclude livemod-gui -- --check
 
   clippy:
     name: Clippy

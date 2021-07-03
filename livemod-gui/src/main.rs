@@ -96,14 +96,13 @@ fn main() {
                             .iter_mut()
                             .find(|var| var.name == namespaced_name[0])
                             .unwrap();
-                        
+
                         // Iterate into fields
                         for name in &namespaced_name[1..] {
                             value = match value.data_type {
-                                TrackedDataRepr::Struct { ref mut fields, .. } => fields
-                                    .iter_mut()
-                                    .find(|var| var.name == *name)
-                                    .unwrap(),
+                                TrackedDataRepr::Struct { ref mut fields, .. } => {
+                                    fields.iter_mut().find(|var| var.name == *name).unwrap()
+                                }
                                 _ => panic!(),
                             };
                         }

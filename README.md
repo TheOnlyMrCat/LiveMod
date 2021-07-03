@@ -1,5 +1,10 @@
 # livemod - Runtime modification of program values
 
+[![livemod-test](https://github.com/TheOnlyMrCat/LiveMod/actions/workflows/test.yml/badge.svg)](https://github.com/TheOnlyMrCat/LiveMod/actions/workflows/test.yml)
+[![livemod-gui](https://github.com/TheOnlyMrCat/LiveMod/actions/workflows/gui.yml/badge.svg)](https://github.com/TheOnlyMrCat/LiveMod/actions/workflows/gui.yml)
+[![crates.io](https://img.shields.io/crates/v/livemod)](https://crates.io/crates/livemod)
+[![dependency status](https://deps.rs/repo/github/TheOnlyMrCat/livemod/status.svg)](https://deps.rs/repo/github/TheOnlyMrCat/livemod)
+
 Livemod is my attempt to make Unity-style runtime parameter modification possible in Rust.
 
 ## Usage
