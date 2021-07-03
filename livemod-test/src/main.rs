@@ -16,6 +16,7 @@ fn main() {
     livemod.track_variable("Float", &STRAIGHT_VALUE);
     livemod.track_variable("Non-derived", &NON_DERIVED);
     let mut derived = livemod.create_variable("Derived", DerivedData::default());
+    let _derived_tuple_struct = livemod.create_variable("Tuple struct", DerivedTuple::default());
     let mut can_remove = Some(livemod.create_variable("Remove me", false));
     let _vector = livemod.create_variable("Vector", vec![6.4, 8.2]);
     let running = AtomicBool::new(true);
@@ -121,3 +122,6 @@ impl Default for DerivedData {
         }
     }
 }
+
+#[derive(Default, LiveMod)]
+struct DerivedTuple(u32, u64);
