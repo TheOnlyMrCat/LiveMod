@@ -189,7 +189,7 @@ fn main() {
             }
         }
         glutin::event::Event::WindowEvent { event, .. } => {
-            egui.on_event(event, control_flow);
+            egui.on_event(&event);
             display.gl_window().window().request_redraw();
         }
         _ => (),

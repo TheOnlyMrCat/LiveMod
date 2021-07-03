@@ -3,5 +3,8 @@ name = "livemod-test"
 version = "0.1.0"
 edition = "2018"
 
+[features]
+livemod-disabled = ["livemod/disabled"]
+
 [dependencies]
 livemod = { path="../livemod-lib", features=["derive"] }

@@ -10,9 +10,9 @@ version = "0.3.0"
 edition = "2018"
 
 [dependencies]
-egui = "0.12.0"
-egui_glium = "0.12.0"
-glium = "0.29.1"
+egui = "0.13"
+egui_glium = "0.13"
+glium = "0.30"
 base64 = "0.13"
 nanoserde = "0.1"
 livemod = { path = "../livemod-lib", version = "0.3" }
