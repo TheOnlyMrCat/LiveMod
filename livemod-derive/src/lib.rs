@@ -59,14 +59,14 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
                                 let repr_method = Ident::new(&repr_method, trait_.span());
                                 quote! { #trait_::#repr_method(&self.#ident, #args) }
                             } else {
-                                quote! { ::livemod::LiveMod::data_type(&self.#ident) }
+                                quote! { ::livemod::LiveMod::repr_default(&self.#ident) }
                             };
                             Some((
                                 quote! {
                                     ::livemod::TrackedData {
                                         name: String::from(#name),
                                         data_type: #repr,
-                                        modifies_structure: false,
+                                        triggers: vec![],
                                     }
                                 },
                                 (
@@ -88,12 +88,13 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
                 let gen = quote! {
                     #[automatically_derived]
                     impl ::livemod::LiveMod for #struct_name {
-                        fn data_type(&self) -> ::livemod::TrackedDataRepr {
+                        fn repr_default(&self) -> ::livemod::TrackedDataRepr {
                             ::livemod::TrackedDataRepr::Struct {
                                 name: String::from(stringify!(#struct_name)),
                                 fields: vec![
                                     #(#fields),*
                                 ],
+                                triggers: vec![]
                             }
                         }
 
@@ -104,7 +105,7 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
                             }
                         }
 
-                        fn trigger(&mut self, trigger: ::livemod::Trigger) {
+                        fn trigger(&mut self, trigger: ::livemod::Trigger) -> bool {
                             panic!("Unexpected trigger operation!")
                         }
 

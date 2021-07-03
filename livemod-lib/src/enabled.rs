@@ -32,6 +32,7 @@ impl LiveModHandle {
             .spawn()
             .unwrap();
         let (sender, recv) = mpsc::channel();
+        let output_sender = sender.clone();
 
         let stdin = child.stdin.take().unwrap();
         let stdout = child.stdout.take().unwrap();
@@ -43,6 +44,7 @@ impl LiveModHandle {
         let variables_arc2 = variables_arc1.clone();
         let variables_arc3 = variables_arc1.clone();
 
+
         std::thread::Builder::new()
             .name("livemod_input".to_owned())
             .spawn(|| {
@@ -53,7 +55,7 @@ impl LiveModHandle {
         std::thread::Builder::new()
             .name("livemod_output".to_owned())
             .spawn(|| {
-                output_thread(stdout, variables_arc3);
+                output_thread(stdout, output_sender, variables_arc3);
                 drop(child_arc2);
             })
             .unwrap();
@@ -202,6 +204,7 @@ enum Message {
     NewVariable(String, ModVarHandle),
     UpdatedVariable(String, ModVarHandle),
     RemoveVariable(String),
+    UpdatedRepr(Vec<String>),
 }
 
 struct ChildDropper {
@@ -229,7 +232,7 @@ fn input_thread(
                         "n{};{};{}",
                         &name,
                         base64::encode_config(
-                            var.data_type().serialize_bin(),
+                            var.repr_default().serialize_bin(),
                             base64::STANDARD_NO_PAD
                         ),
                         base64::encode_config(
@@ -244,12 +247,40 @@ fn input_thread(
                     let var = unsafe { handle.var.as_ref() }.lock();
                     writeln!(
                         input,
-                        "u{};{}",
+                        "s{};{}",
                         &name,
                         base64::encode_config(
                             var.get_self().serialize_bin(),
                             base64::STANDARD_NO_PAD
                         ),
+                    )
+                    .unwrap();
+                }
+                Message::UpdatedRepr(path) => {
+                    // Get the 'base' variable from our HashMap
+                    let base = path.first().unwrap();
+                    let mut var_handle =
+                        unsafe { &mut *variables.read().get(base).unwrap().var.as_ref().lock() };
+
+                    // Follow the 'path' of field names, if needed
+                    if path.len() > 2 {
+                        for name in &path[1..=path.len() - 2] {
+                            var_handle = var_handle.get_named_value(name);
+                        }
+                    }
+
+                    writeln!(
+                        input,
+                        "u{};{};{}",
+                        path.into_iter().reduce(|acc, v| format!("{}:{}", acc, v)).unwrap(),
+                        base64::encode_config(
+                            var_handle.repr_default().serialize_bin(),
+                            base64::STANDARD_NO_PAD
+                        ),
+                        base64::encode_config(
+                            var_handle.get_self().serialize_bin(),
+                            base64::STANDARD_NO_PAD
+                        ),                       
                     )
                     .unwrap();
                 }
@@ -268,7 +299,11 @@ fn input_thread(
     write!(input, "\0").unwrap();
 }
 
-fn output_thread(output: ChildStdout, variables: Arc<RwLock<HashMap<String, ModVarHandle>>>) {
+fn output_thread(
+    output: ChildStdout,
+    sender: Sender<Message>,
+    variables: Arc<RwLock<HashMap<String, ModVarHandle>>>,
+) {
     for line in BufReader::new(output).lines() {
         let line = line.as_ref().unwrap().as_bytes();
         match line[0] {
@@ -282,54 +317,63 @@ fn output_thread(output: ChildStdout, variables: Arc<RwLock<HashMap<String, ModV
                 // Data is to be changed
                 let namespaced_name = line[2..] // Not [1..], because the first character of the name will be ':'
                     .split(|&b| b == b':' || b == b';')
-                    .collect::<Vec<_>>();
-                
-                // Get the 'base' variable from our HashMap
-                let base = std::str::from_utf8(namespaced_name.first().unwrap()).unwrap();
-                let mut var_handle =
-                unsafe { &mut *variables.read().get(base).unwrap().var.as_ref().lock() };
+                    .map(std::str::from_utf8)
+                    .collect::<Result<Vec<_>, _>>()
+                    .unwrap();
 
-                // Follow the 'path' of field names, if needed
+                // Get the 'base' variable from our HashMap
+                let base = namespaced_name.first().unwrap();
+                let mut var_handle =
+                    unsafe { &mut *variables.read().get(*base).unwrap().var.as_ref().lock() };
+
+                // Follow the 'path' of field names, if needed, ignoring the part after ';'
                 if namespaced_name.len() > 2 {
                     for name in &namespaced_name[1..=namespaced_name.len() - 2] {
-                        let name = std::str::from_utf8(name).unwrap();
                         var_handle = var_handle.get_named_value(name);
                     }
                 }
 
                 // Set the variable
-                var_handle.trigger(Trigger::Set(
+                if var_handle.trigger(Trigger::Set(
                     TrackedDataValue::deserialize_bin(
                         &base64::decode_config(
-                            line[line.iter().position(|&b| b == b';').unwrap() + 1..].to_owned(),
+                            namespaced_name.last().unwrap(),
                             base64::STANDARD_NO_PAD,
                         )
                         .unwrap(),
                     )
                     .unwrap(),
-                ))
+                )) {
+                    sender.send(Message::UpdatedRepr(namespaced_name.into_iter().map(str::to_owned).collect())).unwrap();
+                }
             }
             b't' => {
                 // A trigger on an object
                 let namespaced_name = line[2..] // Not [1..], because the first character of the name will be ':'
-                    .split(|&b| b == b':')
-                    .collect::<Vec<_>>();
+                    .split(|&b| b == b':' || b == b';')
+                    .map(std::str::from_utf8)
+                    .collect::<Result<Vec<_>, _>>()
+                    .unwrap();
 
                 // Get the 'base' variable from our HashMap
-                let base = std::str::from_utf8(namespaced_name.first().unwrap()).unwrap();
+                let base = namespaced_name.first().unwrap();
                 let mut var_handle =
-                unsafe { &mut *variables.read().get(base).unwrap().var.as_ref().lock() };
+                    unsafe { &mut *variables.read().get(*base).unwrap().var.as_ref().lock() };
 
-                // Follow the 'path' of field names, if needed, ignoring the last element of the name
+                // Follow the 'path' of field names, if needed, ignoring the part after ';'
                 if namespaced_name.len() > 2 {
                     for name in &namespaced_name[1..=namespaced_name.len() - 2] {
-                        let name = std::str::from_utf8(name).unwrap();
                         var_handle = var_handle.get_named_value(name);
                     }
                 }
 
                 // Trigger the action denoted by the last element of the name
-                var_handle.trigger(Trigger::Trigger(String::from_utf8((*namespaced_name.last().unwrap()).to_owned()).unwrap()))
+                if var_handle.trigger(Trigger::Trigger(
+                    (*namespaced_name.last().unwrap()).to_owned(),
+                )) {
+                    let len = namespaced_name.len() - 1;
+                    sender.send(Message::UpdatedRepr(namespaced_name.into_iter().take(len).map(str::to_owned).collect())).unwrap();
+                }
             }
             _ => {
                 debug_assert!(false, "Unexpected output from child process")

@@ -1,3 +1,5 @@
+use std::sync::mpsc;
+
 use livemod::{
     livemod_static, LiveMod, LiveModHandle, Multiline, Slider, TrackedDataRepr, TrackedDataValue,
     Trigger, TriggerFn,
@@ -15,8 +17,10 @@ fn main() {
     livemod.track_variable("Non-derived", &NON_DERIVED);
     let mut derived = livemod.create_variable("Derived", DerivedData::default());
     let mut can_remove = Some(livemod.create_variable("Remove me", false));
+    let _vector = livemod.create_variable("Vector", vec![6.4, 8.2]);
+    let (send, recv) = mpsc::channel();
     let _trigger =
-        livemod.create_variable("Trigger", TriggerFn::new((), |()| println!("Triggered!")));
+        livemod.create_variable("Exit", TriggerFn::new((), move |()| send.send(()).unwrap()));
 
     let mut prev_float = *STRAIGHT_VALUE.lock();
     let mut prev_nonderived = NON_DERIVED.lock().value;
@@ -24,7 +28,7 @@ fn main() {
     println!("Float: {}", prev_float);
     println!("Non-derived: {}", prev_nonderived);
     println!("Derived: {:?}", prev_derived);
-    loop {
+    while let Err(_) = recv.try_recv() {
         let cur_float = *STRAIGHT_VALUE.lock();
         let cur_nonderived = NON_DERIVED.lock().value;
         let mut cur_derived = derived.lock_mut();
@@ -59,7 +63,7 @@ struct Data {
 }
 
 impl LiveMod for Data {
-    fn data_type(&self) -> TrackedDataRepr {
+    fn repr_default(&self) -> TrackedDataRepr {
         livemod::TrackedDataRepr::UnsignedSlider {
             storage_min: u32::MIN as u64,
             storage_max: u32::MAX as u64,
@@ -72,8 +76,9 @@ impl LiveMod for Data {
         unimplemented!()
     }
 
-    fn trigger(&mut self, trigger: Trigger) {
+    fn trigger(&mut self, trigger: Trigger) -> bool {
         self.value = *trigger.try_into_set().unwrap().as_unsigned_int().unwrap() as u32;
+        false
     }
 
     fn get_self(&self) -> TrackedDataValue {

@@ -19,15 +19,15 @@ pub use disabled::*;
 use nanoserde::{DeBin, SerBin};
 
 /// A named field in a tracked variable
-#[derive(SerBin, DeBin)]
+#[derive(Clone, Debug, SerBin, DeBin)]
 pub struct TrackedData {
     pub name: String,
     pub data_type: TrackedDataRepr,
-    pub modifies_structure: bool,
+    pub triggers: Vec<String>,
 }
 
 /// The representation of a tracked field
-#[derive(SerBin, DeBin)]
+#[derive(Clone, Debug, SerBin, DeBin)]
 pub enum TrackedDataRepr {
     SignedSlider {
         storage_min: i64,
@@ -69,6 +69,7 @@ pub enum TrackedDataRepr {
     Struct {
         name: String,
         fields: Vec<TrackedData>,
+        triggers: Vec<String>,
     },
 }
 
@@ -152,11 +153,11 @@ impl Trigger {
 /// Data which can be registered with a [`LiveModHandle`]
 pub trait LiveMod {
     /// The default representation of the data
-    fn data_type(&self) -> TrackedDataRepr;
+    fn repr_default(&self) -> TrackedDataRepr;
     /// If this is a struct, get the field by this name
     fn get_named_value(&mut self, name: &str) -> &mut dyn LiveMod;
-    /// Trigger an action on this data
-    fn trigger(&mut self, trigger: Trigger);
+    /// Trigger an action on this data. Returns whether the representation has changed
+    fn trigger(&mut self, trigger: Trigger) -> bool;
     /// Return the current value of this data, whether it is a struct or a value
     fn get_self(&self) -> TrackedDataValue;
 }
@@ -186,7 +187,7 @@ macro_rules! unsigned_primitive_impl {
     ($($ty:ident),*) => {
         $(
         impl LiveMod for $ty {
-            fn data_type(&self) -> TrackedDataRepr {
+            fn repr_default(&self) -> TrackedDataRepr {
                 TrackedDataRepr::UnsignedInteger {
                     min: $ty::MIN as u64,
                     max: $ty::MAX as u64,
@@ -197,8 +198,9 @@ macro_rules! unsigned_primitive_impl {
                 unimplemented!()
             }
 
-            fn trigger(&mut self, trigger: Trigger) {
-                *self = *trigger.try_into_set().unwrap().as_unsigned_int().unwrap() as $ty
+            fn trigger(&mut self, trigger: Trigger) -> bool {
+                *self = *trigger.try_into_set().unwrap().as_unsigned_int().unwrap() as $ty;
+                false
             }
 
             fn get_self(&self) -> TrackedDataValue {
@@ -224,7 +226,7 @@ macro_rules! signed_primitive_impl {
     ($($ty:ident),*) => {
         $(
         impl LiveMod for $ty {
-            fn data_type(&self) -> TrackedDataRepr {
+            fn repr_default(&self) -> TrackedDataRepr {
                 TrackedDataRepr::SignedInteger {
                     min: $ty::MIN as i64,
                     max: $ty::MAX as i64,
@@ -235,8 +237,9 @@ macro_rules! signed_primitive_impl {
                 unimplemented!()
             }
 
-            fn trigger(&mut self, trigger: Trigger) {
-                *self = *trigger.try_into_set().unwrap().as_signed_int().unwrap() as $ty
+            fn trigger(&mut self, trigger: Trigger) -> bool {
+                *self = *trigger.try_into_set().unwrap().as_signed_int().unwrap() as $ty;
+                false
             }
 
             fn get_self(&self) -> TrackedDataValue {
@@ -262,7 +265,7 @@ macro_rules! float_primitive_impl {
     ($($ty:ident),*) => {
         $(
         impl LiveMod for $ty {
-            fn data_type(&self) -> TrackedDataRepr {
+            fn repr_default(&self) -> TrackedDataRepr {
                 TrackedDataRepr::Float {
                     min: $ty::MIN as f64,
                     max: $ty::MAX as f64,
@@ -273,8 +276,9 @@ macro_rules! float_primitive_impl {
                 unimplemented!()
             }
 
-            fn trigger(&mut self, trigger: Trigger) {
-                *self = *trigger.try_into_set().unwrap().as_float().unwrap() as $ty
+            fn trigger(&mut self, trigger: Trigger) -> bool {
+                *self = *trigger.try_into_set().unwrap().as_float().unwrap() as $ty;
+                false
             }
 
             fn get_self(&self) -> TrackedDataValue {
@@ -301,7 +305,7 @@ signed_primitive_impl!(i8, i16, i32, i64, isize);
 float_primitive_impl!(f32, f64);
 
 impl LiveMod for bool {
-    fn data_type(&self) -> TrackedDataRepr {
+    fn repr_default(&self) -> TrackedDataRepr {
         TrackedDataRepr::Bool
     }
 
@@ -309,8 +313,9 @@ impl LiveMod for bool {
         unimplemented!()
     }
 
-    fn trigger(&mut self, trigger: Trigger) {
-        *self = *trigger.try_into_set().unwrap().as_bool().unwrap()
+    fn trigger(&mut self, trigger: Trigger) -> bool {
+        *self = *trigger.try_into_set().unwrap().as_bool().unwrap();
+        false
     }
 
     fn get_self(&self) -> TrackedDataValue {
@@ -319,7 +324,7 @@ impl LiveMod for bool {
 }
 
 impl LiveMod for String {
-    fn data_type(&self) -> TrackedDataRepr {
+    fn repr_default(&self) -> TrackedDataRepr {
         TrackedDataRepr::String { multiline: false }
     }
 
@@ -327,8 +332,9 @@ impl LiveMod for String {
         unimplemented!()
     }
 
-    fn trigger(&mut self, trigger: Trigger) {
-        *self = trigger.try_into_set().unwrap().into_string().unwrap()
+    fn trigger(&mut self, trigger: Trigger) -> bool {
+        *self = trigger.try_into_set().unwrap().into_string().unwrap();
+        false
     }
 
     fn get_self(&self) -> TrackedDataValue {
@@ -339,6 +345,54 @@ impl LiveMod for String {
 impl Multiline for String {
     fn repr_multiline(&self) -> TrackedDataRepr {
         TrackedDataRepr::String { multiline: true }
+    }
+}
+
+impl<T> LiveMod for Vec<T>
+where
+    T: LiveMod + Default,
+{
+    fn repr_default(&self) -> TrackedDataRepr {
+        TrackedDataRepr::Struct {
+            name: "Vec".to_owned(),
+            fields: self
+                .iter()
+                .enumerate()
+                .map(|(i, v)| TrackedData {
+                    name: format!("{}", i),
+                    data_type: v.repr_default(),
+                    triggers: vec!["Remove".to_owned()],
+                })
+                .collect(),
+            triggers: vec!["Add element".to_owned()],
+        }
+    }
+
+    fn get_named_value(&mut self, name: &str) -> &mut dyn LiveMod {
+        let idx = name.parse::<usize>().unwrap();
+        &mut self[idx]
+    }
+
+    fn trigger(&mut self, trigger: Trigger) -> bool {
+        let trigger = trigger.try_into_trigger().unwrap();
+        if trigger == "Add element" {
+            self.push(Default::default());
+        } else {
+            let parts = trigger.split('.').collect::<Vec<_>>();
+            if parts[1] == "Remove" {
+                self.remove(parts[0].parse().unwrap());
+            }
+        }
+        true
+    }
+
+    fn get_self(&self) -> TrackedDataValue {
+        TrackedDataValue::Struct(
+            self.iter()
+                .enumerate()
+                .map(|(i, v)| (format!("{}", i), v.get_self()))
+                .collect(),
+        )
     }
 }
 
@@ -354,17 +408,20 @@ impl<A, F: FnMut(&mut A)> TriggerFn<A, F> {
 }
 
 impl<A, F: FnMut(&mut A)> LiveMod for TriggerFn<A, F> {
-    fn data_type(&self) -> TrackedDataRepr {
-        TrackedDataRepr::Trigger { name: "Call".to_owned() }
+    fn repr_default(&self) -> TrackedDataRepr {
+        TrackedDataRepr::Trigger {
+            name: "Call".to_owned(),
+        }
     }
 
     fn get_named_value(&mut self, _name: &str) -> &mut dyn LiveMod {
         unimplemented!()
     }
 
-    fn trigger(&mut self, trigger: Trigger) {
+    fn trigger(&mut self, trigger: Trigger) -> bool {
         trigger.try_into_trigger().unwrap();
-        (self.func)(&mut self.arg)
+        (self.func)(&mut self.arg);
+        false
     }
 
     fn get_self(&self) -> TrackedDataValue {

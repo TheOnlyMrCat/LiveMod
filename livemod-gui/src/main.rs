@@ -3,7 +3,7 @@ use std::io::{BufRead, BufReader};
 use std::sync::mpsc::{self, Sender};
 
 use glium::glutin;
-use livemod::{TrackedDataRepr, TrackedDataValue};
+use livemod::{TrackedData, TrackedDataRepr, TrackedDataValue};
 use nanoserde::{DeBin, SerBin};
 
 fn create_display(event_loop: &glutin::event_loop::EventLoop<()>) -> glium::Display {
@@ -37,6 +37,7 @@ fn main() {
     let mut current_variables = Vec::new();
     let mut values = Values::default();
     let mut modified_variables = Vec::new();
+    let mut quit = false;
 
     event_loop.run(move |event, _, control_flow| match event {
         glutin::event::Event::MainEventsCleared => {
@@ -68,7 +69,7 @@ fn main() {
                                 recursive_namespaced_insert(name, field_value, values);
                             }
                         }
-                        TrackedDataValue::Trigger => {},
+                        TrackedDataValue::Trigger => {}
                     }
                 }
 
@@ -79,13 +80,50 @@ fn main() {
                             initial_value,
                             &mut values,
                         );
-                        current_variables.push((name, data));
+                        current_variables.push(TrackedData {
+                            name,
+                            data_type: data,
+                            triggers: vec![],
+                        });
+                    }
+                    Message::UpdateRepr(path, data, value) => {
+                        recursive_namespaced_insert(format!(":{}", path), value, &mut values);
+
+                        let namespaced_name = path.split(':').collect::<Vec<_>>();
+
+                        // Get base variable
+                        let mut value = current_variables
+                            .iter_mut()
+                            .find(|var| var.name == namespaced_name[0])
+                            .unwrap();
+                        
+                        // Iterate into fields
+                        for name in &namespaced_name[1..] {
+                            value = match value.data_type {
+                                TrackedDataRepr::Struct { ref mut fields, .. } => fields
+                                    .iter_mut()
+                                    .find(|var| var.name == *name)
+                                    .unwrap(),
+                                _ => panic!(),
+                            };
+                        }
+
+                        value.data_type = data;
                     }
                     Message::UpdateData(name, value) => {
                         recursive_namespaced_insert(format!(":{}", name), value, &mut values);
                     }
                     Message::RemoveData(name) => {
-                        current_variables.remove(current_variables.iter().position(|(n, _)| name == *n).unwrap());
+                        current_variables.remove(
+                            current_variables
+                                .iter()
+                                .position(|d| name == d.name)
+                                .unwrap(),
+                        );
+                    }
+                    Message::Quit => {
+                        eprintln!("Did quit");
+                        quit = true;
                     }
                 }
             }
@@ -101,7 +139,8 @@ fn main() {
                             ui,
                             &mut values,
                             &mut modified_variables,
-                            current_variables.iter().map(|(s, v)| (s.clone(), v)),
+                            current_variables.iter(),
+                            std::iter::empty(),
                             String::new(),
                         )
                     });
@@ -109,10 +148,7 @@ fn main() {
 
             for (name, value) in modified_variables.drain(..) {
                 if let TrackedDataValue::Trigger = value {
-                    println!(
-                        "t{}",
-                        name,
-                    )
+                    println!("t{}", name,)
                 } else {
                     println!(
                         "s{};{}",
@@ -124,7 +160,9 @@ fn main() {
 
             let (needs_repaint, shapes) = egui.end_frame(&display);
 
-            *control_flow = if needs_repaint {
+            *control_flow = if quit {
+                glutin::event_loop::ControlFlow::Exit
+            } else if needs_repaint {
                 display.gl_window().window().request_redraw();
                 cached_shapes = Some(shapes);
                 glutin::event_loop::ControlFlow::Poll
@@ -154,7 +192,6 @@ fn main() {
             egui.on_event(event, control_flow);
             display.gl_window().window().request_redraw();
         }
-
         _ => (),
     });
 }
@@ -170,22 +207,34 @@ struct Values {
 
 enum Message {
     NewData(String, TrackedDataRepr, TrackedDataValue),
+    UpdateRepr(String, TrackedDataRepr, TrackedDataValue),
     UpdateData(String, TrackedDataValue),
     RemoveData(String),
+    Quit,
 }
 
 fn recursive_ui<'a>(
     ui: &mut egui::Ui,
     values: &mut Values,
     modified_variables: &mut Vec<(String, TrackedDataValue)>,
-    variables: impl Iterator<Item = (String, &'a TrackedDataRepr)>,
+    variables: impl Iterator<Item = &'a TrackedData>,
+    triggers: impl Iterator<Item = String>,
     namespace: String,
 ) {
-    for (name, var) in variables {
+    for TrackedData {
+        name,
+        data_type: var,
+        triggers,
+    } in variables
+    {
         ui.label(name.clone());
         let namespaced_name = format!("{}:{}", namespace, name);
         match &var {
-            livemod::TrackedDataRepr::Struct { name, fields } => {
+            TrackedDataRepr::Struct {
+                name,
+                fields,
+                triggers,
+            } => {
                 ui.collapsing(name, |ui| {
                     egui::Grid::new(format!("{}_grid", &namespaced_name))
                         .striped(true)
@@ -195,17 +244,14 @@ fn recursive_ui<'a>(
                                 ui,
                                 values,
                                 modified_variables,
-                                fields
-                                    .iter()
-                                    .map(|field| (field.name.clone(), &field.data_type))
-                                    .collect::<Vec<_>>()
-                                    .into_iter(),
+                                fields.iter(),
+                                triggers.clone().into_iter(),
                                 namespaced_name,
                             )
                         });
                 });
             }
-            livemod::TrackedDataRepr::SignedSlider {
+            TrackedDataRepr::SignedSlider {
                 storage_min,
                 storage_max,
                 suggested_min,
@@ -233,7 +279,7 @@ fn recursive_ui<'a>(
                     .integer(),
                 );
             }
-            livemod::TrackedDataRepr::UnsignedSlider {
+            TrackedDataRepr::UnsignedSlider {
                 storage_min,
                 storage_max,
                 suggested_min,
@@ -355,8 +401,10 @@ fn recursive_ui<'a>(
             }
             TrackedDataRepr::Trigger { name } => {
                 if ui.button(&name).clicked() {
-                    modified_variables
-                        .push((format!("{}:{}", namespaced_name.clone(), name), livemod::TrackedDataValue::Trigger));
+                    modified_variables.push((
+                        format!("{}:{}", namespaced_name, name),
+                        livemod::TrackedDataValue::Trigger,
+                    ));
                 }
             }
             TrackedDataRepr::String { multiline } => {
@@ -380,7 +428,23 @@ fn recursive_ui<'a>(
                 }
             }
         }
+        for trigger_name in triggers {
+            if ui.button(&trigger_name).clicked() {
+                modified_variables.push((
+                    format!("{};{}.{}", namespace, name, trigger_name),
+                    livemod::TrackedDataValue::Trigger,
+                ));
+            }
+        }
         ui.end_row();
+    }
+    for name in triggers {
+        if ui.button(&name).clicked() {
+            modified_variables.push((
+                format!("{};{}", namespace, name),
+                livemod::TrackedDataValue::Trigger,
+            ));
+        }
     }
 }
 
@@ -390,7 +454,10 @@ fn reader_thread(sender: Sender<Message>) {
         let line = line.as_bytes();
         let segments = line[1..].split(|c| *c == b';').collect::<Vec<_>>();
         match line[0] {
-            b'\0' => break,
+            b'\0' => {
+                sender.send(Message::Quit).unwrap();
+                break;
+            }
             b'n' => {
                 // New variable to track
                 sender
@@ -407,7 +474,7 @@ fn reader_thread(sender: Sender<Message>) {
                     ))
                     .unwrap();
             }
-            b'u' => {
+            b's' => {
                 // Variable was updated
                 sender
                     .send(Message::UpdateData(
@@ -419,9 +486,29 @@ fn reader_thread(sender: Sender<Message>) {
                     ))
                     .unwrap();
             }
+            b'u' => {
+                // Variable representation was updated
+                sender
+                    .send(Message::UpdateRepr(
+                        String::from_utf8(segments[0].to_owned()).unwrap(),
+                        TrackedDataRepr::deserialize_bin(
+                            &base64::decode_config(&segments[1], base64::STANDARD_NO_PAD).unwrap(),
+                        )
+                        .unwrap(),
+                        TrackedDataValue::deserialize_bin(
+                            &base64::decode_config(&segments[2], base64::STANDARD_NO_PAD).unwrap(),
+                        )
+                        .unwrap(),
+                    ))
+                    .unwrap();
+            }
             b'r' => {
                 // Variable was dropped
-                sender.send(Message::RemoveData(String::from_utf8(segments[0].to_owned()).unwrap())).unwrap()
+                sender
+                    .send(Message::RemoveData(
+                        String::from_utf8(segments[0].to_owned()).unwrap(),
+                    ))
+                    .unwrap()
             }
             _ => {
                 debug_assert!(false, "Unexpected input")
