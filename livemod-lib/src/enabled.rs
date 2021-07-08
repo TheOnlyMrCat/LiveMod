@@ -5,7 +5,7 @@ use std::ops::{Deref, DerefMut};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::ptr::NonNull;
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::Arc;
+use std::sync::{Arc, Barrier};
 
 use nanoserde::{DeBin, SerBin};
 use parking_lot::{Mutex, MutexGuard, RwLock};
@@ -13,10 +13,10 @@ use parking_lot::{Mutex, MutexGuard, RwLock};
 use crate::{LiveMod, TrackedDataValue, Trigger};
 
 /// A handle to an external livemod viewer.
-#[derive(Clone)]
 pub struct LiveModHandle {
     sender: Sender<Message>,
     variables: Arc<RwLock<HashMap<String, ModVarHandle>>>,
+    barrier: Arc<Barrier>,
 }
 
 impl LiveModHandle {
@@ -45,6 +45,9 @@ impl LiveModHandle {
         let variables_arc2 = variables_arc1.clone();
         let variables_arc3 = variables_arc1.clone();
 
+        let barrier_arc1 = Arc::new(Barrier::new(2));
+        let barrier_arc2 = barrier_arc1.clone();
+
         std::thread::Builder::new()
             .name("livemod_input".to_owned())
             .spawn(|| {
@@ -55,7 +58,7 @@ impl LiveModHandle {
         std::thread::Builder::new()
             .name("livemod_output".to_owned())
             .spawn(|| {
-                output_thread(stdout, output_sender, variables_arc3);
+                output_thread(stdout, output_sender, variables_arc3, barrier_arc2);
                 drop(child_arc2);
             })
             .unwrap();
@@ -63,6 +66,7 @@ impl LiveModHandle {
         LiveModHandle {
             sender,
             variables: variables_arc1,
+            barrier: barrier_arc1,
         }
     }
 
@@ -79,12 +83,14 @@ impl LiveModHandle {
     pub fn create_variable<'a, T: LiveMod + 'a>(&self, name: &str, var: T) -> ModVar<T> {
         let mod_var = ModVar {
             name: name.to_owned(),
-            handle: self.clone(),
             value: Box::new(Mutex::new(var)),
+            sender: self.sender.clone(),
+            variables: self.variables.clone(),
         };
         let var_handle = ModVarHandle {
             var: unsafe {
                 // SAFETY: The handle is explicitly removed as soon as it goes out of scope
+                // !Unsound: If this variable is on the stack and forgotten, this pointer becomes dangling
                 std::mem::transmute::<
                     NonNull<Mutex<dyn LiveMod + 'a>>,
                     NonNull<Mutex<dyn LiveMod + 'static>>,
@@ -99,13 +105,21 @@ impl LiveModHandle {
     }
 }
 
+impl Drop for LiveModHandle {
+    fn drop(&mut self) {
+        self.sender.send(Message::Quit).unwrap();
+        self.barrier.wait();
+    }
+}
+
 /// A variable tracked by an external livemod viewer
 ///
 /// A `ModVar` cannot be created directly, and must be created using the [`LiveModHandle::create_variable`] method.
 pub struct ModVar<T> {
     name: String,
-    handle: LiveModHandle,
     value: Box<Mutex<T>>,
+    sender: Sender<Message>,
+    variables: Arc<RwLock<HashMap<String, ModVarHandle>>>,
 }
 
 impl<T: LiveMod> ModVar<T> {
@@ -120,11 +134,10 @@ impl<T: LiveMod> ModVar<T> {
 
 impl<T> Drop for ModVar<T> {
     fn drop(&mut self) {
-        self.handle
-            .sender
+        self.sender
             .send(Message::RemoveVariable(self.name.clone()))
             .unwrap();
-        self.handle.variables.write().remove(&self.name);
+        self.variables.write().remove(&self.name);
     }
 }
 
@@ -194,7 +207,7 @@ impl UpdateMessage<'_> {
                     >(NonNull::from(&*var.value))
                 },
             },
-            sender: var.handle.sender.clone(),
+            sender: var.sender.clone(),
             _marker: std::marker::PhantomData,
         }
     }
@@ -219,6 +232,7 @@ enum Message {
     UpdatedVariable(String, ModVarHandle),
     RemoveVariable(String),
     UpdatedRepr(Vec<String>),
+    Quit,
 }
 
 struct ChildDropper {
@@ -296,6 +310,9 @@ fn input_thread(
             Message::RemoveVariable(name) => {
                 writeln!(input, "r{}", &name).unwrap();
             }
+            Message::Quit => {
+                break;
+            }
         }
     }
     // Tell the child we're finished, so it can tell the output thread
@@ -306,6 +323,7 @@ fn output_thread(
     output: ChildStdout,
     sender: Sender<Message>,
     variables: Arc<RwLock<HashMap<String, ModVarHandle>>>,
+    barrier: Arc<Barrier>,
 ) {
     for line in BufReader::new(output).lines() {
         let line = line.as_ref().unwrap().as_bytes();
@@ -400,4 +418,5 @@ fn output_thread(
             }
         }
     }
+    barrier.wait();
 }

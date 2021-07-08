@@ -130,7 +130,6 @@ fn main() {
                         );
                     }
                     Message::Quit => {
-                        eprintln!("Did quit");
                         quit = true;
                     }
                 }

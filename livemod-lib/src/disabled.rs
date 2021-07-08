@@ -2,7 +2,6 @@ use std::ops::{Deref, DerefMut};
 
 use crate::LiveMod;
 
-#[derive(Clone)]
 pub struct LiveModHandle;
 
 impl LiveModHandle {
