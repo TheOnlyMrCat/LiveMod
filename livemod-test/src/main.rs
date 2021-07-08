@@ -17,6 +17,7 @@ fn main() {
     livemod.track_variable("Non-derived", &NON_DERIVED);
     let mut derived = livemod.create_variable("Derived", DerivedData::default());
     let _derived_tuple_struct = livemod.create_variable("Tuple struct", DerivedTuple::default());
+    let derived_enum = livemod.create_variable("Derived enum", DerivedEnum::StructVariant { float_slider: 5.3 });
     let mut can_remove = Some(livemod.create_variable("Remove me", false));
     let _vector = livemod.create_variable("Vector", vec![6.4, 8.2]);
     let running = AtomicBool::new(true);
@@ -28,13 +29,16 @@ fn main() {
     let mut prev_float = *STRAIGHT_VALUE.lock();
     let mut prev_nonderived = NON_DERIVED.lock().value;
     let mut prev_derived = derived.lock().clone();
+    let mut prev_enum = derived_enum.lock().clone();
     println!("Float: {}", prev_float);
     println!("Non-derived: {}", prev_nonderived);
     println!("Derived: {:?}", prev_derived);
+    println!("Enum: {:?}", prev_enum);
     while running.load(Ordering::Relaxed) {
         let cur_float = *STRAIGHT_VALUE.lock();
         let cur_nonderived = NON_DERIVED.lock().value;
         let mut cur_derived = derived.lock_mut();
+        let mut cur_enum = derived_enum.lock();
         #[allow(clippy::float_cmp)]
         if cur_float != prev_float {
             println!("Float: {}", cur_float);
@@ -51,6 +55,10 @@ fn main() {
             if cur_derived.floating_point != 3.2 {
                 cur_derived.floating_point = 3.2;
             }
+        }
+        if *cur_enum != prev_enum {
+            println!("Enum: {:?}", *cur_enum);
+            prev_enum = cur_enum.clone();
         }
         if let Some(r) = can_remove {
             if *r.lock() {
@@ -126,6 +134,7 @@ impl Default for DerivedData {
 #[derive(Default, LiveMod)]
 struct DerivedTuple(u32, u64);
 
+#[derive(Clone, Debug, PartialEq, LiveMod)]
 enum DerivedEnum {
     UnitVariant,
     TupleVariant(f32, String),

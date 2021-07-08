@@ -324,6 +324,8 @@ fn output_thread(
                     .collect::<Result<Vec<_>, _>>()
                     .unwrap();
 
+                dbg!(&namespaced_name);
+
                 // Get the 'base' variable from our HashMap
                 let base = namespaced_name.first().unwrap();
                 let mut var_handle =

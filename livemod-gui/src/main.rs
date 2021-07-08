@@ -274,17 +274,29 @@ fn recursive_ui<'a>(
                                 .enum_variant
                                 .entry(namespaced_name.clone())
                                 .or_default();
-                            egui::ComboBox::from_id_source(format!("{}_variant", &namespaced_name))
+                            let mut changed = false;
+                            egui::ComboBox::from_id_source(format!(
+                                    "{}_variant",
+                                    &namespaced_name
+                                ))
                                 .selected_text(selected_variant.clone())
                                 .show_ui(ui, |ui| {
                                     for variant in variants {
-                                        ui.selectable_value(
-                                            selected_variant,
-                                            variant.clone(),
-                                            variant,
-                                        );
+                                        changed |= ui.selectable_value(selected_variant, variant.clone(), variant).clicked();
                                     }
                                 });
+                            if changed {
+                                modified_variables.push((
+                                    namespaced_name.clone(),
+                                    TrackedDataValue::EnumVariant(
+                                        values
+                                            .enum_variant
+                                            .entry(namespaced_name.clone())
+                                            .or_default()
+                                            .clone(),
+                                    ),
+                                ))
+                            }
                             ui.end_row();
                             recursive_ui(
                                 ui,
