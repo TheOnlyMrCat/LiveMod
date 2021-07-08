@@ -1,37 +1,73 @@
 use proc_macro2::{Ident, Literal, TokenStream};
 use quote::quote;
-use syn::{DeriveInput, FieldsNamed, FieldsUnnamed, LitStr, Token, parenthesized, parse::Parse, punctuated::Punctuated};
+use syn::{
+    parenthesized, parse::Parse, punctuated::Punctuated, DataEnum, DeriveInput, FieldsNamed,
+    FieldsUnnamed, LitStr, Token,
+};
 
 #[proc_macro_derive(LiveMod, attributes(livemod))]
 pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let ast: DeriveInput = syn::parse(input).unwrap();
 
     match ast.data {
-        syn::Data::Struct(st) => match st.fields {
-            syn::Fields::Named(fields) => {
-                named_struct(ast.ident, fields).into()
-            }
-            syn::Fields::Unnamed(fields) => {
-                tuple_struct(ast.ident, fields).into()
-            },
-            syn::Fields::Unit => {
-                let gen = quote! {
-                    compile_error!("Derive not supported on unit struct")
-                };
-                gen.into()
-            },
-        },
-        syn::Data::Enum(_en) => todo!(),
+        syn::Data::Struct(st) => {
+            let struct_name = ast.ident;
+            let (fields, matches, gets) = match st.fields {
+                syn::Fields::Named(fields) => derive_fields_named(fields),
+                syn::Fields::Unnamed(fields) => derive_fields_unnamed(fields),
+                syn::Fields::Unit => {
+                    let gen = quote! {
+                        compile_error!("Derive not supported on unit struct")
+                    };
+                    return gen.into();
+                }
+            };
+            let gen = quote! {
+                #[automatically_derived]
+                impl ::livemod::LiveMod for #struct_name {
+                    fn repr_default(&self) -> ::livemod::TrackedDataRepr {
+                        ::livemod::TrackedDataRepr::Struct {
+                            name: String::from(stringify!(#struct_name)),
+                            fields: vec![
+                                #(#fields),*
+                            ],
+                            triggers: vec![]
+                        }
+                    }
+
+                    fn get_named_value(&mut self, name: &str) -> &mut ::livemod::LiveMod {
+                        match name {
+                            #(#matches ,)*
+                            _ => panic!("Unexpected value name!"),
+                        }
+                    }
+
+                    fn trigger(&mut self, trigger: ::livemod::Trigger) -> bool {
+                        panic!("Unexpected trigger operation!")
+                    }
+
+                    fn get_self(&self) -> ::livemod::TrackedDataValue {
+                        ::livemod::TrackedDataValue::Struct(vec![
+                            #(#gets),*
+                        ])
+                    }
+                }
+            };
+            gen.into()
+        }
+        syn::Data::Enum(en) => derive_enum(ast.ident, en).into(),
         syn::Data::Union(_) => {
             let gen = quote! {
                 compile_error!("Derive not supported on union")
             };
             gen.into()
-        },
+        }
     }
 }
 
-fn named_struct(struct_name: Ident, fields: FieldsNamed) -> TokenStream {
+fn derive_fields_named(
+    fields: FieldsNamed,
+) -> (Vec<TokenStream>, Vec<TokenStream>, Vec<TokenStream>) {
     let (fields, matches_gets) = fields
         .named
         .into_iter()
@@ -108,40 +144,12 @@ fn named_struct(struct_name: Ident, fields: FieldsNamed) -> TokenStream {
 
     let (matches, gets) = matches_gets.into_iter().unzip::<_, _, Vec<_>, Vec<_>>();
 
-    quote! {
-        #[automatically_derived]
-        impl ::livemod::LiveMod for #struct_name {
-            fn repr_default(&self) -> ::livemod::TrackedDataRepr {
-                ::livemod::TrackedDataRepr::Struct {
-                    name: String::from(stringify!(#struct_name)),
-                    fields: vec![
-                        #(#fields),*
-                    ],
-                    triggers: vec![]
-                }
-            }
-
-            fn get_named_value(&mut self, name: &str) -> &mut ::livemod::LiveMod {
-                match name {
-                    #(#matches ,)*
-                    _ => panic!("Unexpected value name!"),
-                }
-            }
-
-            fn trigger(&mut self, trigger: ::livemod::Trigger) -> bool {
-                panic!("Unexpected trigger operation!")
-            }
-
-            fn get_self(&self) -> ::livemod::TrackedDataValue {
-                ::livemod::TrackedDataValue::Struct(vec![
-                    #(#gets),*
-                ])
-            }
-        }
-    }
+    (fields, matches, gets)
 }
 
-fn tuple_struct(struct_name: Ident, fields: FieldsUnnamed) -> TokenStream {
+fn derive_fields_unnamed(
+    fields: FieldsUnnamed,
+) -> (Vec<TokenStream>, Vec<TokenStream>, Vec<TokenStream>) {
     let (fields, matches_gets) = fields
         .unnamed
         .into_iter()
@@ -207,34 +215,75 @@ fn tuple_struct(struct_name: Ident, fields: FieldsUnnamed) -> TokenStream {
 
     let (matches, gets) = matches_gets.into_iter().unzip::<_, _, Vec<_>, Vec<_>>();
 
+    (fields, matches, gets)
+}
+
+fn derive_enum(enum_name: Ident, en: DataEnum) -> TokenStream {
+    let (variants_fields, matches_gets) = en
+        .variants
+        .into_iter()
+        .map(|variant| {
+            let ident = variant.ident;
+            let stringified_ident = ident.to_string();
+
+            let (var_fields, var_matches, var_gets) = match variant.fields {
+                syn::Fields::Named(fields) => derive_fields_named(fields),
+                syn::Fields::Unnamed(fields) => derive_fields_unnamed(fields),
+                syn::Fields::Unit => (vec![], vec![], vec![]),
+            };
+
+            (
+                (
+                    quote! { stringified_ident },
+                    quote! { #ident => vec![#(#var_fields),*] },
+                ),
+                (
+                    quote! { #ident => match name { #(#var_matches ,)* } },
+                    quote! {
+                        #ident => ::livemod::TrackedDataValue::Enum {
+                            variant: #stringified_ident.to_owned(),
+                            fields: vec![#(#var_gets),*]
+                        }
+                    },
+                ),
+            )
+        })
+        .unzip::<_, _, Vec<_>, Vec<_>>();
+
+    let (variants, fields) = variants_fields.into_iter().unzip::<_, _, Vec<_>, Vec<_>>();
+    let (matches, gets) = matches_gets.into_iter().unzip::<_, _, Vec<_>, Vec<_>>();
+
     quote! {
         #[automatically_derived]
-        impl ::livemod::LiveMod for #struct_name {
+        impl ::livemod::LiveMod for #enum_name {
             fn repr_default(&self) -> ::livemod::TrackedDataRepr {
-                ::livemod::TrackedDataRepr::Struct {
-                    name: String::from(stringify!(#struct_name)),
-                    fields: vec![
-                        #(#fields),*
-                    ],
+                ::livemod::TrackedDataRepr::Enum {
+                    name: String::from(stringify!(#enum_name)),
+                    variants: vec![
+                        #(#variants),*
+                    ]
+                    fields: match self {
+                        #(#fields ,)*
+                    },
                     triggers: vec![]
                 }
             }
 
             fn get_named_value(&mut self, name: &str) -> &mut ::livemod::LiveMod {
-                match name {
+                match self {
                     #(#matches ,)*
-                    _ => panic!("Unexpected value name!"),
                 }
             }
 
             fn trigger(&mut self, trigger: ::livemod::Trigger) -> bool {
+                //TODO: Set own variant
                 panic!("Unexpected trigger operation!")
             }
 
             fn get_self(&self) -> ::livemod::TrackedDataValue {
-                ::livemod::TrackedDataValue::Struct(vec![
-                    #(#gets),*
-                ])
+                match self {
+                    #(#gets ,)*
+                }
             }
         }
     }

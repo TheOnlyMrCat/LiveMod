@@ -69,6 +69,14 @@ fn main() {
                                 recursive_namespaced_insert(name, field_value, values);
                             }
                         }
+                        TrackedDataValue::Enum { variant, fields } => {
+                            values.enum_variant.insert(namespaced_name.clone(), variant);
+                            for (field_name, field_value) in fields {
+                                let name = format!("{}:{}", namespaced_name, field_name);
+                                recursive_namespaced_insert(name, field_value, values);
+                            }
+                        }
+                        TrackedDataValue::EnumVariant(_) => {} // This will never be sent to us, so ignore it.
                         TrackedDataValue::Trigger => {}
                     }
                 }
@@ -202,6 +210,7 @@ struct Values {
     f64: HashMap<String, f64>,
     bool: HashMap<String, bool>,
     str: HashMap<String, String>,
+    enum_variant: HashMap<String, String>,
 }
 
 enum Message {
@@ -239,6 +248,44 @@ fn recursive_ui<'a>(
                         .striped(true)
                         .spacing([40.0, 4.0])
                         .show(ui, |ui| {
+                            recursive_ui(
+                                ui,
+                                values,
+                                modified_variables,
+                                fields.iter(),
+                                triggers.clone().into_iter(),
+                                namespaced_name,
+                            )
+                        });
+                });
+            }
+            TrackedDataRepr::Enum {
+                name,
+                variants,
+                fields,
+                triggers,
+            } => {
+                ui.collapsing(name, |ui| {
+                    egui::Grid::new(format!("{}_grid", &namespaced_name))
+                        .striped(true)
+                        .spacing([40.0, 4.0])
+                        .show(ui, |ui| {
+                            let selected_variant = values
+                                .enum_variant
+                                .entry(namespaced_name.clone())
+                                .or_default();
+                            egui::ComboBox::from_id_source(format!("{}_variant", &namespaced_name))
+                                .selected_text(selected_variant.clone())
+                                .show_ui(ui, |ui| {
+                                    for variant in variants {
+                                        ui.selectable_value(
+                                            selected_variant,
+                                            variant.clone(),
+                                            variant,
+                                        );
+                                    }
+                                });
+                            ui.end_row();
                             recursive_ui(
                                 ui,
                                 values,

@@ -125,3 +125,11 @@ impl Default for DerivedData {
 
 #[derive(Default, LiveMod)]
 struct DerivedTuple(u32, u64);
+
+enum DerivedEnum {
+    UnitVariant,
+    TupleVariant(f32, String),
+    StructVariant {
+        float_slider: f32,
+    }
+}

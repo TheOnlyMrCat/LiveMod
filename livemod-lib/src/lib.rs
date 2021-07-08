@@ -66,6 +66,12 @@ pub enum TrackedDataRepr {
     String {
         multiline: bool,
     },
+    Enum {
+        name: String,
+        variants: Vec<String>,
+        fields: Vec<TrackedData>,
+        triggers: Vec<String>,
+    },
     Struct {
         name: String,
         fields: Vec<TrackedData>,
@@ -81,6 +87,11 @@ pub enum TrackedDataValue {
     Bool(bool),
     String(String),
     Struct(Vec<(String, TrackedDataValue)>),
+    EnumVariant(String),
+    Enum {
+        variant: String,
+        fields: Vec<(String, TrackedDataValue)>,
+    },
     Trigger,
 }
 
