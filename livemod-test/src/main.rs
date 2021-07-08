@@ -144,6 +144,6 @@ enum DerivedEnum {
     TupleVariant(f32, #[livemod(repr = Multiline)] String),
     StructVariant {
         #[livemod(repr = Slider(0.0..=5.0))]
-        float_slider: f32
+        float_slider: f32,
     },
 }

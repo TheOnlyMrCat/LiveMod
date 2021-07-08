@@ -243,7 +243,7 @@ fn derive_enum(enum_name: Ident, en: DataEnum) -> TokenStream {
                             fields: vec![]
                         }
                     },
-                    quote! { #stringified_ident => #qualified_ident }
+                    quote! { #stringified_ident => #qualified_ident },
                 ),
             };
 
@@ -252,7 +252,10 @@ fn derive_enum(enum_name: Ident, en: DataEnum) -> TokenStream {
                     quote! { #stringified_ident.to_owned() },
                     quote! { #var_fields },
                 ),
-                (quote! { #var_matches }, (quote! { #var_gets }, quote! { #var_default })),
+                (
+                    quote! { #var_matches },
+                    (quote! { #var_gets }, quote! { #var_default }),
+                ),
             )
         })
         .unzip::<_, _, Vec<_>, Vec<_>>();
