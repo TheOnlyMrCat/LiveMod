@@ -13,6 +13,9 @@ use parking_lot::{Mutex, MutexGuard, RwLock};
 use crate::{LiveMod, TrackedDataValue, Trigger};
 
 /// A handle to an external livemod viewer.
+///
+/// This handle is used to create [`ModVar`]s and track [`StaticModVar`]s. It must be kept alive
+/// for the user interface to continue running.
 pub struct LiveModHandle {
     sender: Sender<Message>,
     variables: Arc<RwLock<HashMap<String, ModVarHandle>>>,
@@ -70,6 +73,7 @@ impl LiveModHandle {
         }
     }
 
+    /// Track an existing [`StaticModVar`]
     pub fn track_variable<T: LiveMod + 'static>(&self, name: &str, var: &'static StaticModVar<T>) {
         let var_handle = ModVarHandle {
             var: NonNull::from(&var.value),
@@ -80,6 +84,8 @@ impl LiveModHandle {
     }
 
     /// Create a variable and send it to the external viewer to be tracked.
+    ///
+    /// The variable will be removed from the external viewer when it is dropped.
     pub fn create_variable<'a, T: LiveMod + 'a>(&self, name: &str, var: T) -> ModVar<T> {
         let mod_var = ModVar {
             name: name.to_owned(),
@@ -89,8 +95,8 @@ impl LiveModHandle {
         };
         let var_handle = ModVarHandle {
             var: unsafe {
-                // SAFETY: The handle is explicitly removed as soon as it goes out of scope
-                // !Unsound: If this variable is on the stack and forgotten, this pointer becomes dangling
+                // SAFETY: The handle's value is stored on the heap, explicitly removed from the external viewer
+                // if it is dropped, but remaining valid if forgotten.
                 std::mem::transmute::<
                     NonNull<Mutex<dyn LiveMod + 'a>>,
                     NonNull<Mutex<dyn LiveMod + 'static>>,
@@ -123,10 +129,15 @@ pub struct ModVar<T> {
 }
 
 impl<T: LiveMod> ModVar<T> {
+    /// Get an immutable reference to the value in this `ModVar`. The value will not be changed
+    /// by the external viewer while this reference is held.
     pub fn lock(&self) -> ModVarGuard<T> {
         ModVarGuard(self.value.lock())
     }
 
+    /// Get a mutable reference to the value in thie `ModVar` The value will not be changed
+    /// by the external viewer while this reference is held. The value in the external viewer
+    /// will be updated if and only if the `ModVarMutGuard` is dereferenced mutably.
     pub fn lock_mut(&mut self) -> ModVarMutGuard<T> {
         ModVarMutGuard(self.value.lock(), Some(UpdateMessage::new(self)))
     }
@@ -141,7 +152,7 @@ impl<T> Drop for ModVar<T> {
     }
 }
 
-/// A static trackable livemod variable
+/// A static trackable livemod variable.
 pub struct StaticModVar<T> {
     value: Mutex<T>,
 }
@@ -153,11 +164,14 @@ impl<T> StaticModVar<T> {
         }
     }
 
+    /// Get an immutable reference to the value in this `ModVar`. The value will not be changed
+    /// by the external viewer while this reference is held.
     pub fn lock(&self) -> ModVarGuard<T> {
         ModVarGuard(self.value.lock())
     }
 }
 
+/// An immutable lock of a [`ModVar`] or [`StaticModVar`]. Can be dereferenced to get the contained data.
 pub struct ModVarGuard<'a, T>(MutexGuard<'a, T>);
 
 impl<'a, T> Deref for ModVarGuard<'a, T> {
@@ -168,6 +182,9 @@ impl<'a, T> Deref for ModVarGuard<'a, T> {
     }
 }
 
+/// A mutable lock of a [`ModVar`]. Can be dereferenced to get the contained data, and modified.
+///
+/// The value is updated in the external viewer if and only if this guard is dereferenced mutably.
 pub struct ModVarMutGuard<'a, T>(MutexGuard<'a, T>, Option<UpdateMessage<'a>>);
 
 impl<'a, T> Deref for ModVarMutGuard<'a, T> {

@@ -1,11 +1,12 @@
-# livemod - Runtime modification of program values
+# LiveMod - Runtime modification of program values
 
 [![livemod-test](https://github.com/TheOnlyMrCat/LiveMod/actions/workflows/test.yml/badge.svg)](https://github.com/TheOnlyMrCat/LiveMod/actions/workflows/test.yml)
 [![livemod-gui](https://github.com/TheOnlyMrCat/LiveMod/actions/workflows/gui.yml/badge.svg)](https://github.com/TheOnlyMrCat/LiveMod/actions/workflows/gui.yml)
 [![crates.io](https://img.shields.io/crates/v/livemod)](https://crates.io/crates/livemod)
 [![dependency status](https://deps.rs/repo/github/TheOnlyMrCat/livemod/status.svg)](https://deps.rs/repo/github/TheOnlyMrCat/livemod)
 
-Livemod is my attempt to make Unity-style runtime parameter modification possible in Rust.
+Livemod is my attempt to make Unity-style runtime parameter modification possible in Rust, in a way that is simple
+and easy to turn off if necessary.
 
 ## Usage
 
@@ -27,9 +28,7 @@ let tracked_variable = livemod.create_variable("My variable", 0_u32);
 
 ### Using `#[derive]`
 
-The `LiveMod` trait can be `#[derive]`d if the feature `derive` is enabled (Currently only on structs with named fields,
-but support for tuple structs, enums, and unions is planned). The behaviour of the derive macro can be modified with the
-`#[livemod]` field attribute, the behaviour of which is documented below:
+The `LiveMod` trait can be `#[derive]`d if the feature `derive` is enabled. The behaviour of the derive macro can be modified with the `#[livemod]` field attribute, the behaviour of which is documented below:
 
 #### `#[livemod(skip)]`: Skip representing a field
 

@@ -1,4 +1,4 @@
-//! # livemod
+//! # livemod - Runtime modification of program parameters
 
 use std::ops::RangeInclusive;
 
@@ -18,60 +18,72 @@ pub use disabled::*;
 
 use nanoserde::{DeBin, SerBin};
 
-/// A named field in a tracked variable
+/// A named field in a tracked structure
 #[derive(Clone, Debug, SerBin, DeBin)]
 pub struct TrackedData {
     pub name: String,
     pub data_type: TrackedDataRepr,
+    /// Triggers from the surrounding structure on this field. For example, remove an element from an array.
     pub triggers: Vec<String>,
 }
 
-/// The representation of a tracked field
+/// The representation of a tracked field. Corresponds with one or more [`TrackedDataValue`]s
 #[derive(Clone, Debug, SerBin, DeBin)]
 pub enum TrackedDataRepr {
+    /// A signed integer with suggested bounds, corresponds with [`TrackedDataValue::SignedInt`]
     SignedSlider {
         storage_min: i64,
         storage_max: i64,
         suggested_min: i64,
         suggested_max: i64,
     },
+    /// An unsigned integer with suggested bounds, corresponds with [`TrackedDataValue::UnsignedInt`]
     UnsignedSlider {
         storage_min: u64,
         storage_max: u64,
         suggested_min: u64,
         suggested_max: u64,
     },
+    /// A floating-point number with suggested bounds, corresponds with [`TrackedDataValue::Float`]
     FloatSlider {
         storage_min: f64,
         storage_max: f64,
         suggested_min: f64,
         suggested_max: f64,
     },
+    /// A signed integer without suggested bounds, corresponds with [`TrackedDataValue::SignedInt`]
     SignedInteger {
         min: i64,
         max: i64,
     },
+    /// An unsigned integer without suggested bounds, corresponds with [`TrackedDataValue::UnsignedInt`]
     UnsignedInteger {
         min: u64,
         max: u64,
     },
+    /// A floating-point number without suggested bounds, corresponds with [`TrackedDataValue::Float`]
     Float {
         min: f64,
         max: f64,
     },
+    /// A boolean, corresponds with [`TrackedDataValue::Bool`]
     Bool,
+    /// A triggerable action, corresponds with [`TrackedDataValue::Trigger`]
     Trigger {
         name: String,
     },
+    /// A string, corresponds with [`TrackedDataValue::String`]
     String {
         multiline: bool,
     },
+    /// A sum type with named fields, corresponds with [`TrackedDataValue::Enum`] and [`TrackedDataValue::EnumVariant`]
     Enum {
         name: String,
         variants: Vec<String>,
         fields: Vec<TrackedData>,
         triggers: Vec<String>,
     },
+    /// A heterogeneous structure with named fields, corresponds with [`TrackedDataValue::Struct`]
     Struct {
         name: String,
         fields: Vec<TrackedData>,
@@ -79,19 +91,29 @@ pub enum TrackedDataRepr {
     },
 }
 
+/// The data contained within a tracked field. Corresponds with one or more [`TrackedDataRepr`]s
 #[derive(Debug, Clone, SerBin, DeBin)]
 pub enum TrackedDataValue {
+    /// A signed integer, corresponds with [`TrackedDataRepr::SignedSlider`] and [`TrackedDataRepr::SignedInteger`]
     SignedInt(i64),
+    /// An unsigned integer, corresponds with [`TrackedDataRepr::UnsignedSlider`] and [`TrackedDataRepr::UnsignedInteger`]
     UnsignedInt(u64),
+    /// A floating-point value, corresponds with [`TrackedDataRepr::FloatSlider`] and [`TrackedDataRepr::Float`]
     Float(f64),
+    /// A boolean, corresponds with [`TrackedDataRepr::Bool`]
     Bool(bool),
+    /// A string, corresponds with [`TrackedDataRepr::String`]
     String(String),
+    /// A heterogeneous structure of labelled fields, corresponds with [`TrackedDataRepr::Struct`]
     Struct(Vec<(String, TrackedDataValue)>),
+    /// The name of a variant in a sum type, corresponds with [`TrackedDataRepr::Enum`]
     EnumVariant(String),
+    /// The variant and fields in a sum type, corresponds with [`TrackedDataRepr::Enum`]
     Enum {
         variant: String,
         fields: Vec<(String, TrackedDataValue)>,
     },
+    /// No value, but does something when activated, corresponds with [`TrackedDataRepr::Trigger`]
     Trigger,
 }
 
@@ -145,9 +167,12 @@ impl TrackedDataValue {
     }
 }
 
+/// An action that can be taken on a [`LiveMod`] variable.
 #[derive(Clone, Debug)]
 pub enum Trigger {
+    /// Set its own value to this value.
     Set(TrackedDataValue),
+    /// Trigger an action by the given name.
     Trigger(String),
 }
 
@@ -175,7 +200,7 @@ pub trait LiveMod {
     fn repr_default(&self) -> TrackedDataRepr;
     /// If this is a struct, get the field by this name
     fn get_named_value(&mut self, name: &str) -> &mut dyn LiveMod;
-    /// Trigger an action on this data. Returns whether the representation has changed
+    /// Trigger an action on this data. Returns whether the representation has changed and needs to be updated.
     fn trigger(&mut self, trigger: Trigger) -> bool;
     /// Return the current value of this data, whether it is a struct or a value
     fn get_self(&self) -> TrackedDataValue;
