@@ -275,14 +275,17 @@ fn recursive_ui<'a>(
                                 .entry(namespaced_name.clone())
                                 .or_default();
                             let mut changed = false;
-                            egui::ComboBox::from_id_source(format!(
-                                    "{}_variant",
-                                    &namespaced_name
-                                ))
+                            egui::ComboBox::from_id_source(format!("{}_variant", &namespaced_name))
                                 .selected_text(selected_variant.clone())
                                 .show_ui(ui, |ui| {
                                     for variant in variants {
-                                        changed |= ui.selectable_value(selected_variant, variant.clone(), variant).clicked();
+                                        changed |= ui
+                                            .selectable_value(
+                                                selected_variant,
+                                                variant.clone(),
+                                                variant,
+                                            )
+                                            .clicked();
                                     }
                                 });
                             if changed {

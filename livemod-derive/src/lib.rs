@@ -1,4 +1,4 @@
-use proc_macro2::{Ident, Literal, TokenStream, Span};
+use proc_macro2::{Ident, Literal, Span, TokenStream};
 use quote::quote;
 use syn::{
     parenthesized, parse::Parse, punctuated::Punctuated, DataEnum, DeriveInput, FieldsNamed,
@@ -228,8 +228,12 @@ fn derive_enum(enum_name: Ident, en: DataEnum) -> TokenStream {
             let stringified_ident = ident.to_string();
 
             let (var_fields, var_matches, var_gets) = match variant.fields {
-                syn::Fields::Named(fields) => derive_enum_fields_named(ident, qualified_ident, fields),
-                syn::Fields::Unnamed(fields) => derive_enum_fields_unnamed(ident, qualified_ident, fields),
+                syn::Fields::Named(fields) => {
+                    derive_enum_fields_named(ident, qualified_ident, fields)
+                }
+                syn::Fields::Unnamed(fields) => {
+                    derive_enum_fields_unnamed(ident, qualified_ident, fields)
+                }
                 syn::Fields::Unit => (
                     quote! { #qualified_ident => vec![] },
                     quote! { #qualified_ident => panic!("Variant has no fields!") },
@@ -243,7 +247,10 @@ fn derive_enum(enum_name: Ident, en: DataEnum) -> TokenStream {
             };
 
             (
-                (quote! { #stringified_ident.to_owned() }, quote! { #var_fields }),
+                (
+                    quote! { #stringified_ident.to_owned() },
+                    quote! { #var_fields },
+                ),
                 (quote! { #var_matches }, quote! { #var_gets }),
             )
         })
@@ -427,7 +434,10 @@ fn derive_enum_fields_unnamed(
                 Err(error) => {
                     return Some((
                         (error.to_compile_error(), ident.clone()),
-                        (quote! { #name => &mut #ident }, quote! { (#name.to_owned(), ::livemod::LiveMod::get_self(&#ident)) }),
+                        (
+                            quote! { #name => &mut #ident },
+                            quote! { (#name.to_owned(), ::livemod::LiveMod::get_self(&#ident)) },
+                        ),
                     ));
                 }
             };
@@ -451,7 +461,7 @@ fn derive_enum_fields_unnamed(
                                 triggers: vec![],
                             }
                         },
-                        ident.clone()
+                        ident.clone(),
                     ),
                     (
                         quote! {
@@ -459,8 +469,8 @@ fn derive_enum_fields_unnamed(
                         },
                         quote! {
                             (#name.to_owned(), ::livemod::LiveMod::get_self(#ident))
-                        }
-                    )
+                        },
+                    ),
                 ))
             } else {
                 None

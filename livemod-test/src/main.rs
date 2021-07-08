@@ -17,7 +17,10 @@ fn main() {
     livemod.track_variable("Non-derived", &NON_DERIVED);
     let mut derived = livemod.create_variable("Derived", DerivedData::default());
     let _derived_tuple_struct = livemod.create_variable("Tuple struct", DerivedTuple::default());
-    let derived_enum = livemod.create_variable("Derived enum", DerivedEnum::StructVariant { float_slider: 5.3 });
+    let derived_enum = livemod.create_variable(
+        "Derived enum",
+        DerivedEnum::StructVariant { float_slider: 5.3 },
+    );
     let mut can_remove = Some(livemod.create_variable("Remove me", false));
     let _vector = livemod.create_variable("Vector", vec![6.4, 8.2]);
     let running = AtomicBool::new(true);
@@ -135,10 +138,9 @@ impl Default for DerivedData {
 struct DerivedTuple(u32, u64);
 
 #[derive(Clone, Debug, PartialEq, LiveMod)]
+#[allow(clippy::enum_variant_names)]
 enum DerivedEnum {
     UnitVariant,
     TupleVariant(f32, String),
-    StructVariant {
-        float_slider: f32,
-    }
+    StructVariant { float_slider: f32 },
 }
