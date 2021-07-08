@@ -135,6 +135,14 @@ impl TrackedDataValue {
             None
         }
     }
+
+    pub fn try_into_enum_variant(self) -> Result<String, Self> {
+        if let Self::EnumVariant(v) = self {
+            Ok(v)
+        } else {
+            Err(self)
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

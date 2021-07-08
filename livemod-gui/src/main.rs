@@ -108,7 +108,8 @@ fn main() {
                         // Iterate into fields
                         for name in &namespaced_name[1..] {
                             value = match value.data_type {
-                                TrackedDataRepr::Struct { ref mut fields, .. } => {
+                                TrackedDataRepr::Struct { ref mut fields, .. }
+                                | TrackedDataRepr::Enum { ref mut fields, .. } => {
                                     fields.iter_mut().find(|var| var.name == *name).unwrap()
                                 }
                                 _ => panic!(),

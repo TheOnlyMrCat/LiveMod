@@ -219,7 +219,7 @@ fn derive_fields_unnamed(
 }
 
 fn derive_enum(enum_name: Ident, en: DataEnum) -> TokenStream {
-    let (variants_fields, matches_gets) = en
+    let (variants_fields, matches_gets_defaults) = en
         .variants
         .into_iter()
         .map(|variant| {
@@ -227,7 +227,7 @@ fn derive_enum(enum_name: Ident, en: DataEnum) -> TokenStream {
             let qualified_ident = quote! { #enum_name::#ident };
             let stringified_ident = ident.to_string();
 
-            let (var_fields, var_matches, var_gets) = match variant.fields {
+            let (var_fields, var_matches, var_gets, var_default) = match variant.fields {
                 syn::Fields::Named(fields) => {
                     derive_enum_fields_named(ident, qualified_ident, fields)
                 }
@@ -243,6 +243,7 @@ fn derive_enum(enum_name: Ident, en: DataEnum) -> TokenStream {
                             fields: vec![]
                         }
                     },
+                    quote! { #stringified_ident => #qualified_ident }
                 ),
             };
 
@@ -251,13 +252,16 @@ fn derive_enum(enum_name: Ident, en: DataEnum) -> TokenStream {
                     quote! { #stringified_ident.to_owned() },
                     quote! { #var_fields },
                 ),
-                (quote! { #var_matches }, quote! { #var_gets }),
+                (quote! { #var_matches }, (quote! { #var_gets }, quote! { #var_default })),
             )
         })
         .unzip::<_, _, Vec<_>, Vec<_>>();
 
     let (variants, fields) = variants_fields.into_iter().unzip::<_, _, Vec<_>, Vec<_>>();
-    let (matches, gets) = matches_gets.into_iter().unzip::<_, _, Vec<_>, Vec<_>>();
+    let (matches, gets_defaults) = matches_gets_defaults
+        .into_iter()
+        .unzip::<_, _, Vec<_>, Vec<_>>();
+    let (gets, defaults) = gets_defaults.into_iter().unzip::<_, _, Vec<_>, Vec<_>>();
 
     quote! {
         #[automatically_derived]
@@ -282,8 +286,12 @@ fn derive_enum(enum_name: Ident, en: DataEnum) -> TokenStream {
             }
 
             fn trigger(&mut self, trigger: ::livemod::Trigger) -> bool {
-                //TODO: Set own variant
-                panic!("Unexpected trigger operation!")
+                let variant_name = trigger.try_into_set().unwrap().try_into_enum_variant().unwrap();
+                *self = match variant_name.as_str() {
+                    #(#defaults ,)*
+                    name => panic!("Unknown variant name: {}", name)
+                };
+                true
             }
 
             fn get_self(&self) -> ::livemod::TrackedDataValue {
@@ -299,9 +307,9 @@ fn derive_enum_fields_named(
     ident: Ident,
     qualified_ident: TokenStream,
     fields: FieldsNamed,
-) -> (TokenStream, TokenStream, TokenStream) {
+) -> (TokenStream, TokenStream, TokenStream, TokenStream) {
     let stringified_ident = ident.to_string();
-    let (fields_idents, matches_gets) = fields
+    let (fields_idents, matches_gets_defaults) = fields
         .named
         .into_iter()
         .filter_map(|field| {
@@ -323,7 +331,13 @@ fn derive_enum_fields_named(
                     let name = ident.to_string();
                     return Some((
                         (error.to_compile_error(), quote! { vec![] }),
-                        (quote! { #name => &mut self.#ident }, quote! { (#name.to_owned(), ::livemod::LiveMod::get_self(&self.#ident)) }),
+                        (
+                            quote! { #name => &mut self.#ident },
+                            (
+                                quote! { (#name.to_owned(), ::livemod::LiveMod::get_self(&self.#ident)) },
+                                quote! { #ident: Default::default() }
+                            )
+                        ),
                     ));
                 }
             };
@@ -369,19 +383,28 @@ fn derive_enum_fields_named(
                         quote! {
                             #name => #ident
                         },
-                        quote! {
-                            (#name.to_owned(), ::livemod::LiveMod::get_self(#ident))
-                        }
+                        (
+                            quote! {
+                                (#name.to_owned(), ::livemod::LiveMod::get_self(#ident))
+                            },
+                            quote! {
+                                #ident: Default::default()
+                            }
+                        ),
                     )
                 ))
             } else {
+                //TODO: Skipped fields can't be initialised...
                 None
             }
         })
         .unzip::<_, _, Vec<_>, Vec<_>>();
 
     let (fields, idents) = fields_idents.into_iter().unzip::<_, _, Vec<_>, Vec<_>>();
-    let (matches, gets) = matches_gets.into_iter().unzip::<_, _, Vec<_>, Vec<_>>();
+    let (matches, gets_defaults) = matches_gets_defaults
+        .into_iter()
+        .unzip::<_, _, Vec<_>, Vec<_>>();
+    let (gets, defaults) = gets_defaults.into_iter().unzip::<_, _, Vec<_>, Vec<_>>();
 
     let match_pattern = quote! { #qualified_ident { #(#idents ,)* .. } };
     (
@@ -402,6 +425,11 @@ fn derive_enum_fields_named(
                 ]
             }
         },
+        quote! {
+            #stringified_ident => #qualified_ident {
+                #(#defaults),*
+            }
+        },
     )
 }
 
@@ -409,9 +437,9 @@ fn derive_enum_fields_unnamed(
     ident: Ident,
     qualified_ident: TokenStream,
     fields: FieldsUnnamed,
-) -> (TokenStream, TokenStream, TokenStream) {
+) -> (TokenStream, TokenStream, TokenStream, TokenStream) {
     let stringified_ident = ident.to_string();
-    let (fields_indices, matches_gets) = fields
+    let (fields_indices, matches_gets_defaults) = fields
         .unnamed
         .into_iter()
         .enumerate()
@@ -436,7 +464,10 @@ fn derive_enum_fields_unnamed(
                         (error.to_compile_error(), ident.clone()),
                         (
                             quote! { #name => &mut #ident },
-                            quote! { (#name.to_owned(), ::livemod::LiveMod::get_self(&#ident)) },
+                            (
+                                quote! { (#name.to_owned(), ::livemod::LiveMod::get_self(&#ident)) },
+                                quote! { Default::default() },
+                            ),
                         ),
                     ));
                 }
@@ -467,19 +498,26 @@ fn derive_enum_fields_unnamed(
                         quote! {
                             #name => #ident
                         },
-                        quote! {
-                            (#name.to_owned(), ::livemod::LiveMod::get_self(#ident))
-                        },
+                        (
+                            quote! {
+                                (#name.to_owned(), ::livemod::LiveMod::get_self(#ident))
+                            },
+                            quote! { Default::default() }
+                        )
                     ),
                 ))
             } else {
+                //TODO: Skipped fields can't be initialised.
                 None
             }
         })
         .unzip::<_, _, Vec<_>, Vec<_>>();
 
     let (fields, indices) = fields_indices.into_iter().unzip::<_, _, Vec<_>, Vec<_>>();
-    let (matches, gets) = matches_gets.into_iter().unzip::<_, _, Vec<_>, Vec<_>>();
+    let (matches, gets_defaults) = matches_gets_defaults
+        .into_iter()
+        .unzip::<_, _, Vec<_>, Vec<_>>();
+    let (gets, defaults) = gets_defaults.into_iter().unzip::<_, _, Vec<_>, Vec<_>>();
 
     let mut binding_names = vec![];
     for (i, ident) in indices.into_iter().enumerate() {
@@ -507,6 +545,9 @@ fn derive_enum_fields_unnamed(
                     #(#gets),*
                 ]
             }
+        },
+        quote! {
+            #stringified_ident => #qualified_ident(#(#defaults),*)
         },
     )
 }

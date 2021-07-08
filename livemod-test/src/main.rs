@@ -41,7 +41,7 @@ fn main() {
         let cur_float = *STRAIGHT_VALUE.lock();
         let cur_nonderived = NON_DERIVED.lock().value;
         let mut cur_derived = derived.lock_mut();
-        let mut cur_enum = derived_enum.lock();
+        let cur_enum = derived_enum.lock();
         #[allow(clippy::float_cmp)]
         if cur_float != prev_float {
             println!("Float: {}", cur_float);
@@ -141,6 +141,9 @@ struct DerivedTuple(u32, u64);
 #[allow(clippy::enum_variant_names)]
 enum DerivedEnum {
     UnitVariant,
-    TupleVariant(f32, String),
-    StructVariant { float_slider: f32 },
+    TupleVariant(f32, #[livemod(repr = Multiline)] String),
+    StructVariant {
+        #[livemod(repr = Slider(0.0..=5.0))]
+        float_slider: f32
+    },
 }
