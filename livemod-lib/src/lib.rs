@@ -52,30 +52,17 @@ pub enum TrackedDataRepr {
         suggested_max: f64,
     },
     /// A signed integer without suggested bounds, corresponds with [`TrackedDataValue::SignedInt`]
-    SignedInteger {
-        min: i64,
-        max: i64,
-    },
+    SignedInteger { min: i64, max: i64 },
     /// An unsigned integer without suggested bounds, corresponds with [`TrackedDataValue::UnsignedInt`]
-    UnsignedInteger {
-        min: u64,
-        max: u64,
-    },
+    UnsignedInteger { min: u64, max: u64 },
     /// A floating-point number without suggested bounds, corresponds with [`TrackedDataValue::Float`]
-    Float {
-        min: f64,
-        max: f64,
-    },
+    Float { min: f64, max: f64 },
     /// A boolean, corresponds with [`TrackedDataValue::Bool`]
     Bool,
     /// A triggerable action, corresponds with [`TrackedDataValue::Trigger`]
-    Trigger {
-        name: String,
-    },
+    Trigger { name: String },
     /// A string, corresponds with [`TrackedDataValue::String`]
-    String {
-        multiline: bool,
-    },
+    String { multiline: bool },
     /// A sum type with named fields, corresponds with [`TrackedDataValue::Enum`] and [`TrackedDataValue::EnumVariant`]
     Enum {
         name: String,
