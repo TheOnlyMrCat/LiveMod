@@ -357,30 +357,41 @@ fn output_thread(
                     .split(|&b| b == b':' || b == b';')
                     .map(std::str::from_utf8)
                     .collect::<Result<Vec<_>, _>>()
-                    .unwrap();
+                    .expect("Invalid text encoding received from viewer");
 
                 // Get the 'base' variable from our HashMap
                 let base = namespaced_name.first().unwrap();
-                let mut var_handle =
-                    unsafe { &mut *variables.read().get(*base).unwrap().var.as_ref().lock() };
+                let mut referenced_var = unsafe {
+                    &mut *match variables.read().get(*base) {
+                        Some(base_handle) => base_handle,
+                        None => {
+                            // The variable has already been removed
+                            continue;
+                        }
+                    }
+                    .var
+                    // SAFETY: Pointers are valid as long as they are in the map
+                    .as_ref()
+                    .lock()
+                };
 
                 // Follow the 'path' of field names, if needed, ignoring the part after ';'
                 if namespaced_name.len() > 2 {
                     for name in &namespaced_name[1..=namespaced_name.len() - 2] {
-                        var_handle = var_handle.get_named_value(name);
+                        referenced_var = referenced_var.get_named_value(name);
                     }
                 }
 
                 // Set the variable
-                if var_handle.trigger(Trigger::Set(
+                if referenced_var.trigger(Trigger::Set(
                     TrackedDataValue::deserialize_bin(
                         &base64::decode_config(
                             namespaced_name.last().unwrap(),
                             base64::STANDARD_NO_PAD,
                         )
-                        .unwrap(),
+                        .expect("Invalid base64 data received from viewer"),
                     )
-                    .unwrap(),
+                    .expect("Invalid data received from viewer"),
                 )) {
                     let len = namespaced_name.len() - 1;
                     sender
@@ -400,22 +411,33 @@ fn output_thread(
                     .split(|&b| b == b':' || b == b';')
                     .map(std::str::from_utf8)
                     .collect::<Result<Vec<_>, _>>()
-                    .unwrap();
+                    .expect("Invalid text encoding received from viewer");
 
                 // Get the 'base' variable from our HashMap
                 let base = namespaced_name.first().unwrap();
-                let mut var_handle =
-                    unsafe { &mut *variables.read().get(*base).unwrap().var.as_ref().lock() };
+                let mut referenced_var = unsafe {
+                    &mut *match variables.read().get(*base) {
+                        Some(base_handle) => base_handle,
+                        None => {
+                            // The variable has already been removed
+                            continue;
+                        }
+                    }
+                    .var
+                    // SAFETY: Pointers are valid as long as they are in the map
+                    .as_ref()
+                    .lock()
+                };
 
                 // Follow the 'path' of field names, if needed, ignoring the part after ';'
                 if namespaced_name.len() > 2 {
                     for name in &namespaced_name[1..=namespaced_name.len() - 2] {
-                        var_handle = var_handle.get_named_value(name);
+                        referenced_var = referenced_var.get_named_value(name);
                     }
                 }
 
                 // Trigger the action denoted by the last element of the name
-                if var_handle.trigger(Trigger::Trigger(
+                if referenced_var.trigger(Trigger::Trigger(
                     (*namespaced_name.last().unwrap()).to_owned(),
                 )) {
                     let len = namespaced_name.len() - 1;
