@@ -193,17 +193,65 @@ pub trait LiveMod {
     fn get_self(&self) -> TrackedDataValue;
 }
 
-/// Slider representation for numeric values
-pub trait Slider {
-    fn repr_slider(&self, range: RangeInclusive<Self>) -> TrackedDataRepr
-    where
-        Self: Sized;
+pub trait LiveModRepr<T> {
+    fn repr(&self, cur: &T) -> TrackedDataRepr;
 }
 
-/// Multiline string input
-pub trait Multiline {
-    fn repr_multiline(&self) -> TrackedDataRepr;
+pub struct DefaultRepr;
+
+impl<T> LiveModRepr<T> for DefaultRepr
+where
+    T: LiveMod,
+{
+    fn repr(&self, cur: &T) -> TrackedDataRepr {
+        cur.repr_default()
+    }
 }
+
+/// Slider representation for numeric values
+pub struct Slider<T>(pub RangeInclusive<T>);
+
+macro_rules! impl_slider {
+    ($(($t:ty, $var:ident)),*) => {
+        $(
+            impl LiveModRepr<$t> for Slider<$t> {
+                fn repr(&self, _cur: &$t) -> TrackedDataRepr {
+                    TrackedDataRepr::$var {
+                        suggested_min: (*self.0.start()).into(),
+                        suggested_max: (*self.0.end()).into(),
+                        storage_min: <$t>::MIN.into(),
+                        storage_max: <$t>::MAX.into(),
+                    }
+                }
+            }
+        )*
+    };
+}
+
+impl_slider!(
+    (i8, SignedSlider),
+    (i16, SignedSlider),
+    (i32, SignedSlider),
+    (i64, SignedSlider),
+    (u8, UnsignedSlider),
+    (u16, UnsignedSlider),
+    (u32, UnsignedSlider),
+    (u64, UnsignedSlider),
+    (f32, FloatSlider),
+    (f64, FloatSlider)
+);
+
+/// Multiline string input
+pub struct Multiline();
+
+impl LiveModRepr<String> for Multiline {
+    fn repr(&self, _cur: &String) -> TrackedDataRepr {
+        TrackedDataRepr::String {
+            multiline: true,
+        }
+    }
+}
+
 
 #[macro_export]
 macro_rules! livemod_static {
@@ -238,17 +286,6 @@ macro_rules! unsigned_primitive_impl {
                 TrackedDataValue::UnsignedInt(*self as u64)
             }
         }
-
-        impl Slider for $ty {
-            fn repr_slider(&self, range: RangeInclusive<Self>) -> TrackedDataRepr {
-                TrackedDataRepr::UnsignedSlider {
-                    storage_min: $ty::MIN as u64,
-                    storage_max: $ty::MAX as u64,
-                    suggested_min: *range.start() as u64,
-                    suggested_max: *range.end() as u64,
-                }
-            }
-        }
         )*
     }
 }
@@ -277,17 +314,6 @@ macro_rules! signed_primitive_impl {
                 TrackedDataValue::SignedInt(*self as i64)
             }
         }
-
-        impl Slider for $ty {
-            fn repr_slider(&self, range: RangeInclusive<Self>) -> TrackedDataRepr {
-                TrackedDataRepr::SignedSlider {
-                    storage_min: $ty::MIN as i64,
-                    storage_max: $ty::MAX as i64,
-                    suggested_min: *range.start() as i64,
-                    suggested_max: *range.end() as i64,
-                }
-            }
-        }
         )*
     }
 }
@@ -314,17 +340,6 @@ macro_rules! float_primitive_impl {
 
             fn get_self(&self) -> TrackedDataValue {
                 TrackedDataValue::Float(*self as f64)
-            }
-        }
-
-        impl Slider for $ty {
-            fn repr_slider(&self, range: RangeInclusive<Self>) -> TrackedDataRepr {
-                TrackedDataRepr::FloatSlider {
-                    storage_min: $ty::MIN as f64,
-                    storage_max: $ty::MAX as f64,
-                    suggested_min: *range.start() as f64,
-                    suggested_max: *range.end() as f64,
-                }
             }
         }
         )*
@@ -370,12 +385,6 @@ impl LiveMod for String {
 
     fn get_self(&self) -> TrackedDataValue {
         TrackedDataValue::String(self.clone())
-    }
-}
-
-impl Multiline for String {
-    fn repr_multiline(&self) -> TrackedDataRepr {
-        TrackedDataRepr::String { multiline: true }
     }
 }
 

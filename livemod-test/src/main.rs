@@ -141,9 +141,9 @@ struct DerivedTuple(u32, u64);
 #[allow(clippy::enum_variant_names)]
 enum DerivedEnum {
     UnitVariant,
-    TupleVariant(f32, #[livemod(repr = Multiline)] String),
+    TupleVariant(f32, /* #[livemod(repr = Multiline)] */String),
     StructVariant {
-        #[livemod(repr = Slider(0.0..=5.0))]
+        // #[livemod(repr = Slider(0.0..=5.0))]
         float_slider: f32,
     },
 }

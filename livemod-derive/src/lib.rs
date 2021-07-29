@@ -95,7 +95,7 @@ fn derive_fields_named(
                 }
             };
             if !attrs.iter().any(|attr| matches!(attr, Attr::Skip)) {
-                let ident = field.ident.unwrap();
+                let field_name = field.ident.unwrap();
                 let name = attrs
                     .iter()
                     .filter_map(|attr| match attr {
@@ -104,20 +104,18 @@ fn derive_fields_named(
                     })
                     .next_back()
                     .unwrap_or({
-                        let mut name = ident.to_string();
+                        let mut name = field_name.to_string();
                         name.as_mut_str()[..1].make_ascii_uppercase();
                         name = name.replace('_', " ");
                         name
                     });
-                let repr = if let Some(Attr::Repr(trait_, args)) =
+                let field_type = field.ty;
+                let repr = if let Some(Attr::Repr(struct_name, args)) =
                     attrs.iter().rfind(|attr| matches!(attr, Attr::Repr(_, _)))
                 {
-                    let mut repr_method = format!("repr_{}", trait_,);
-                    repr_method.make_ascii_lowercase();
-                    let repr_method = Ident::new(&repr_method, trait_.span());
-                    quote! { #trait_::#repr_method(&self.#ident, #args) }
+                    quote! { <_ as ::livemod::LiveModRepr<#field_type>>::repr(&#struct_name(#args), &self.#field_name) }
                 } else {
-                    quote! { ::livemod::LiveMod::repr_default(&self.#ident) }
+                    quote! { ::livemod::LiveMod::repr_default(&self.#field_name) }
                 };
                 Some((
                     quote! {
@@ -129,10 +127,10 @@ fn derive_fields_named(
                     },
                     (
                         quote! {
-                            #name => &mut self.#ident
+                            #name => &mut self.#field_name
                         },
                         quote! {
-                            (#name.to_owned(), ::livemod::LiveMod::get_self(&self.#ident))
+                            (#name.to_owned(), ::livemod::LiveMod::get_self(&self.#field_name))
                         }
                     )
                 ))
@@ -180,13 +178,11 @@ fn derive_fields_unnamed(
             if !attrs.iter().any(|attr| matches!(attr, Attr::Skip)) {
                 let name = i.to_string();
                 let ident = Literal::usize_unsuffixed(i); //TODO: Set span
-                let repr = if let Some(Attr::Repr(trait_, args)) =
+                let field_type = field.ty;
+                let repr = if let Some(Attr::Repr(struct_name, args)) =
                     attrs.iter().rfind(|attr| matches!(attr, Attr::Repr(_, _)))
                 {
-                    let mut repr_method = format!("repr_{}", trait_,);
-                    repr_method.make_ascii_lowercase();
-                    let repr_method = Ident::new(&repr_method, trait_.span());
-                    quote! { #trait_::#repr_method(&self.#ident, #args) }
+                    quote! { <_ as ::livemod::LiveModRepr<#field_type>>::repr(&#struct_name(#args), &self.#i) }
                 } else {
                     quote! { ::livemod::LiveMod::repr_default(&self.#ident) }
                 };
@@ -359,13 +355,11 @@ fn derive_enum_fields_named(
                         name = name.replace('_', " ");
                         name
                     });
-                let repr = if let Some(Attr::Repr(trait_, args)) =
+                let field_type = field.ty;
+                let repr = if let Some(Attr::Repr(struct_name, args)) =
                     attrs.iter().rfind(|attr| matches!(attr, Attr::Repr(_, _)))
                 {
-                    let mut repr_method = format!("repr_{}", trait_,);
-                    repr_method.make_ascii_lowercase();
-                    let repr_method = Ident::new(&repr_method, trait_.span());
-                    quote! { #trait_::#repr_method(#ident, #args) }
+                    quote! { <#struct_name as ::livemod::LiveModRepr<#field_type>>::repr(&#struct_name(#args), &self) }
                 } else {
                     quote! { ::livemod::LiveMod::repr_default(#ident) }
                 };
@@ -476,13 +470,11 @@ fn derive_enum_fields_unnamed(
                 }
             };
             if !attrs.iter().any(|attr| matches!(attr, Attr::Skip)) {
-                let repr = if let Some(Attr::Repr(trait_, args)) =
+                let field_type = field.ty;
+                let repr = if let Some(Attr::Repr(struct_name, args)) =
                     attrs.iter().rfind(|attr| matches!(attr, Attr::Repr(_, _)))
                 {
-                    let mut repr_method = format!("repr_{}", trait_,);
-                    repr_method.make_ascii_lowercase();
-                    let repr_method = Ident::new(&repr_method, trait_.span());
-                    quote! { #trait_::#repr_method(#ident, #args) }
+                    quote! { <#struct_name as ::livemod::LiveModRepr<#field_type>>::repr(&#struct_name(#args), &self) }
                 } else {
                     quote! { ::livemod::LiveMod::repr_default(#ident) }
                 };
@@ -577,16 +569,16 @@ impl Parse for Attr {
             Ok(Attr::Rename(new_name.value()))
         } else if attr_type == "repr" {
             input.parse::<Token![=]>()?;
-            let trait_name = input.parse()?;
+            let struct_name = input.parse()?;
             if !input.is_empty() {
                 let arguments;
                 parenthesized!(arguments in input);
                 Ok(Attr::Repr(
-                    trait_name,
+                    struct_name,
                     arguments.parse_terminated(TokenStream::parse)?,
                 ))
             } else {
-                Ok(Attr::Repr(trait_name, Punctuated::new()))
+                Ok(Attr::Repr(struct_name, Punctuated::new()))
             }
         } else {
             Err(syn::Error::new(

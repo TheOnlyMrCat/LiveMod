@@ -5,16 +5,20 @@ use crate::LiveMod;
 pub struct LiveModHandle;
 
 impl LiveModHandle {
+    #[inline(always)]
     pub fn new_gui() -> LiveModHandle {
-        LiveModHandle
+       LiveModHandle
     }
 
+    #[inline(always)]
     pub fn new_with_ui(_: &str) -> LiveModHandle {
         LiveModHandle
     }
 
+    #[inline(always)]
     pub fn track_variable<T: 'static + LiveMod>(&self, _: &str, _: &'static StaticModVar<T>) {}
 
+    #[inline(always)]
     pub fn create_variable<'a, T: 'a + LiveMod>(&self, _: &str, var: T) -> ModVar<T> {
         ModVar { value: var }
     }
@@ -26,10 +30,12 @@ pub struct ModVar<T> {
 }
 
 impl<T> ModVar<T> {
+    #[inline(always)]
     pub fn lock(&self) -> ModVarGuard<T> {
         ModVarGuard(&self.value)
     }
 
+    #[inline(always)]
     pub fn lock_mut(&mut self) -> ModVarMutGuard<T> {
         ModVarMutGuard(&mut self.value)
     }
@@ -45,6 +51,7 @@ impl<T> StaticModVar<T> {
         StaticModVar { value }
     }
 
+    #[inline(always)]
     pub fn lock(&self) -> ModVarGuard<T> {
         ModVarGuard(&self.value)
     }
