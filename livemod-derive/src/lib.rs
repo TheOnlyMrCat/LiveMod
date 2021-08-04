@@ -40,7 +40,7 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
                         }
                     }
 
-                    fn get_named_value(&mut self, name: &str) -> &mut ::livemod::LiveMod {
+                    fn get_named_value(&mut self, name: &str) -> &mut dyn ::livemod::LiveMod {
                         let #self_pattern = self;
                         match name {
                             #(#get_named_values ,)*
@@ -62,7 +62,91 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
             };
             gen.into()
         }
-        syn::Data::Enum(en) => todo!(),
+        syn::Data::Enum(en) => {
+            let enum_name = ast.ident;
+
+            let mut variant_names = vec![];
+            let mut variant_fields = vec![];
+            let mut variant_get_named_values = vec![];
+            let mut variant_defaults = vec![];
+            let mut variant_get_selves = vec![];
+
+            for variant in en.variants {
+                let variant_name = variant.ident;
+                let variant_string = variant_name.to_string();
+                variant_names.push(variant_name.to_string());
+                match variant.fields {
+                    syn::Fields::Named(fields) => {
+                        let FieldsDerive { idents, default_values, representations, get_named_values, get_selves } = derive_fields_named(fields);
+                        let self_pattern = quote! {
+                            Self::#variant_name { #(#idents),* }
+                        };
+
+                        variant_fields.push(quote! { #self_pattern => vec![#(#representations),*] });
+                        variant_get_named_values.push(quote! { #self_pattern => match name { #(#get_named_values ,)* _ => panic!("Unexpected value name!") } });
+                        variant_defaults.push(quote! { #variant_string => Self::#variant_name { #(#idents: #default_values),* } });
+                        variant_get_selves.push(quote! { #self_pattern => ::livemod::TrackedDataValue::Enum { variant: #variant_string.to_owned(), fields: vec![#(#get_selves),*] } })
+                    },
+                    syn::Fields::Unnamed(fields) => {
+                        let FieldsDerive { idents, default_values, representations, get_named_values, get_selves } = derive_fields_unnamed(fields);
+                        let self_pattern = quote! {
+                            Self::#variant_name ( #(#idents),* )
+                        };
+
+                        variant_fields.push(quote! { #self_pattern => vec![#(#representations),*] });
+                        variant_get_named_values.push(quote! { #self_pattern => match name { #(#get_named_values ,)* _ => panic!("Unexpected value name!") } });
+                        variant_defaults.push(quote! { #variant_string => Self::#variant_name ( #(#default_values),* ) });
+                        variant_get_selves.push(quote! { #self_pattern => ::livemod::TrackedDataValue::Enum { variant: #variant_string.to_owned(), fields: vec![#(#get_selves),*] } })
+                    }
+                    syn::Fields::Unit => {
+                        variant_fields.push(quote!{ Self::#variant_name => vec![] });
+                        variant_get_named_values.push(quote! { Self::#variant_name => panic!("Unexpected value name!") });
+                        variant_defaults.push(quote! { #variant_string => Self::#variant_name });
+                        variant_get_selves.push(quote! { Self::#variant_name => ::livemod::TrackedDataValue::Enum { variant: #variant_string.to_owned(), fields: vec![] } })
+                    }
+                }
+            }
+
+            let gen = quote! {
+                #[automatically_derived]
+                impl ::livemod::LiveMod for #enum_name {
+                    fn repr_default(&self) -> ::livemod::TrackedDataRepr {
+                        ::livemod::TrackedDataRepr::Enum {
+                            name: String::from(stringify!(#enum_name)),
+                            variants: vec![
+                                #(#variant_names.to_owned()),*
+                            ],
+                            fields: match self {
+                                #(#variant_fields ,)*
+                            },
+                            triggers: vec![]
+                        }
+                    }
+        
+                    fn get_named_value(&mut self, name: &str) -> &mut dyn ::livemod::LiveMod {
+                        match self {
+                            #(#variant_get_named_values ,)*
+                        }
+                    }
+        
+                    fn trigger(&mut self, trigger: ::livemod::Trigger) -> bool {
+                        let variant_name = trigger.try_into_set().unwrap().try_into_enum_variant().unwrap();
+                        *self = match variant_name.as_str() {
+                            #(#variant_defaults ,)*
+                            name => panic!("Unknown variant name: {}", name)
+                        };
+                        true
+                    }
+        
+                    fn get_self(&self) -> ::livemod::TrackedDataValue {
+                        match self {
+                            #(#variant_get_selves ,)*
+                        }
+                    }
+                }
+            };
+            gen.into()
+        },
         syn::Data::Union(_) => {
             let gen = quote! {
                 compile_error!("Derive not supported on union")
