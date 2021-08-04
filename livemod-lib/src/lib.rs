@@ -21,7 +21,9 @@ use nanoserde::{DeBin, SerBin};
 /// A named field in a tracked structure
 #[derive(Clone, Debug, SerBin, DeBin)]
 pub struct TrackedData {
+    /// The name of the field, to be displayed in the UI
     pub name: String,
+    /// The representation of the field in the UI
     pub data_type: TrackedDataRepr,
     /// Triggers from the surrounding structure on this field. For example, remove an element from an array.
     pub triggers: Vec<String>,
@@ -242,7 +244,7 @@ impl_slider!(
 );
 
 /// Multiline string input
-pub struct Multiline();
+pub struct Multiline;
 
 impl LiveModRepr<String> for Multiline {
     fn repr(&self, _cur: &String) -> TrackedDataRepr {

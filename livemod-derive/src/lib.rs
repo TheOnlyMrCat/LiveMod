@@ -1,9 +1,6 @@
 use proc_macro2::{Ident, Literal, Span, TokenStream};
 use quote::quote;
-use syn::{
-    parenthesized, parse::Parse, punctuated::Punctuated, DataEnum, DeriveInput, FieldsNamed,
-    FieldsUnnamed, LitStr, Token,
-};
+use syn::{DataEnum, DeriveInput, Field, FieldsNamed, FieldsUnnamed, LitStr, Token, parenthesized, parse::Parse, punctuated::Punctuated};
 
 #[proc_macro_derive(LiveMod, attributes(livemod))]
 pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
@@ -12,9 +9,9 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
     match ast.data {
         syn::Data::Struct(st) => {
             let struct_name = ast.ident;
-            let (fields, matches, gets) = match st.fields {
-                syn::Fields::Named(fields) => derive_fields_named(fields),
-                syn::Fields::Unnamed(fields) => derive_fields_unnamed(fields),
+            let (FieldsDerive { idents, default_values, representations, get_named_values, get_selves }, named) = match st.fields {
+                syn::Fields::Named(fields) => (derive_fields_named(fields), true),
+                syn::Fields::Unnamed(fields) => (derive_fields_unnamed(fields), false),
                 syn::Fields::Unit => {
                     let gen = quote! {
                         compile_error!("Derive not supported on unit struct")
@@ -22,22 +19,31 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
                     return gen.into();
                 }
             };
+
+            let self_pattern = if named {
+                quote! { Self { #(#idents),* } }
+            } else {
+                quote! { Self ( #(#idents),* ) }
+            };
+
             let gen = quote! {
                 #[automatically_derived]
                 impl ::livemod::LiveMod for #struct_name {
                     fn repr_default(&self) -> ::livemod::TrackedDataRepr {
+                        let #self_pattern = self;
                         ::livemod::TrackedDataRepr::Struct {
                             name: String::from(stringify!(#struct_name)),
                             fields: vec![
-                                #(#fields),*
+                                #(#representations),*
                             ],
                             triggers: vec![]
                         }
                     }
 
                     fn get_named_value(&mut self, name: &str) -> &mut ::livemod::LiveMod {
+                        let #self_pattern = self;
                         match name {
-                            #(#matches ,)*
+                            #(#get_named_values ,)*
                             _ => panic!("Unexpected value name!"),
                         }
                     }
@@ -47,15 +53,16 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
                     }
 
                     fn get_self(&self) -> ::livemod::TrackedDataValue {
+                        let #self_pattern = self;
                         ::livemod::TrackedDataValue::Struct(vec![
-                            #(#gets),*
+                            #(#get_selves),*
                         ])
                     }
                 }
             };
             gen.into()
         }
-        syn::Data::Enum(en) => derive_enum(ast.ident, en).into(),
+        syn::Data::Enum(en) => todo!(),
         syn::Data::Union(_) => {
             let gen = quote! {
                 compile_error!("Derive not supported on union")
@@ -65,6 +72,133 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
     }
 }
 
+struct FieldsDerive {
+    idents: Vec<Ident>,
+    default_values: Vec<TokenStream>,
+    representations: Vec<TokenStream>,
+    get_named_values: Vec<TokenStream>,
+    get_selves: Vec<TokenStream>,
+}
+
+struct FieldDerive {
+    ident: Ident,
+    default_value: TokenStream,
+    representation: Option<TokenStream>,
+    get_named_value: Option<TokenStream>,
+    get_self: Option<TokenStream>,
+}
+
+fn derive_fields_named(fields: FieldsNamed) -> FieldsDerive {
+    let iter = fields.named.into_iter().map(|field| {
+        let ident = field.ident.clone().unwrap();
+        let name = ident.to_string();
+        derive_field(ident, name, field)
+    });
+
+    let mut gen = FieldsDerive {
+        idents: Vec::new(),
+        default_values: Vec::new(),
+        representations: Vec::new(),
+        get_named_values: Vec::new(),
+        get_selves: Vec::new(),
+    };
+
+    for field in iter {
+        gen.idents.push(field.ident);
+        gen.default_values.push(field.default_value);
+        gen.representations.extend(field.representation);
+        gen.get_named_values.extend(field.get_named_value);
+        gen.get_selves.extend(field.get_self);
+    }
+
+    gen
+}
+
+fn derive_fields_unnamed(fields: FieldsUnnamed) -> FieldsDerive {
+    let iter = fields.unnamed.into_iter().enumerate().map(|(i, field)| {
+        let ident = Ident::new(&format!("__{}", i), Span::call_site());
+        let name = i.to_string();
+        derive_field(ident, name, field)
+    });
+
+    let mut gen = FieldsDerive {
+        idents: Vec::new(),
+        default_values: Vec::new(),
+        representations: Vec::new(),
+        get_named_values: Vec::new(),
+        get_selves: Vec::new(),
+    };
+
+    for field in iter {
+        gen.idents.push(field.ident);
+        gen.default_values.push(field.default_value);
+        gen.representations.extend(field.representation);
+        gen.get_named_values.extend(field.get_named_value);
+        gen.get_selves.extend(field.get_self);
+    }
+
+    gen
+}
+
+fn derive_field(ident: Ident, name: String, field: Field) -> FieldDerive {
+    let attrs = match field
+        .attrs
+        .into_iter()
+        .filter_map(|attr| {
+            if attr.path.is_ident("livemod") {
+                Some(syn::parse2(attr.tokens))
+            } else {
+                None
+            }
+        })
+        .collect::<Result<Vec<_>, _>>()
+    {
+        Ok(attrs) => attrs,
+        Err(error) => {
+            return FieldDerive {
+                ident,
+                default_value: error.to_compile_error(),
+                representation: None,
+                get_named_value: None,
+                get_self: None,
+            };
+        }
+    };
+
+    let default_value = if let Some(default) = attrs.iter().find_map(|attr| match attr { Attr::Default(ts) => Some(ts), _ => None }) {
+        default.clone()
+    } else {
+        quote! { ::std::default::Default::default() }
+    };
+
+    let (representation, get_named_value, get_self) = if attrs.iter().any(|attr| matches!(attr, Attr::Skip)) {
+        (None, None, None)
+    } else {
+        let default_repr = quote! { ::livemod::DefaultRepr };
+        let repr_struct = attrs.iter().find_map(|attr| match attr { Attr::Repr(ts) => Some(ts), _ => None }).unwrap_or(&default_repr);
+        let representation = quote! {
+            ::livemod::TrackedData {
+                name: #name.to_owned(),
+                data_type: ::livemod::LiveModRepr::repr(&#repr_struct, #ident) ,
+                triggers: vec![]
+            }
+        };
+
+        let get_named_value = quote! { #name => #ident };
+        let get_self = quote! { (#name.to_owned(), ::livemod::LiveMod::get_self(#ident)) };
+        (Some(representation), Some(get_named_value), Some(get_self))
+    };
+
+    FieldDerive {
+        ident,
+        default_value,
+        representation,
+        get_named_value,
+        get_self,
+    }
+}
+
+/*
 fn derive_fields_named(
     fields: FieldsNamed,
 ) -> (Vec<TokenStream>, Vec<TokenStream>, Vec<TokenStream>) {
@@ -341,7 +475,7 @@ fn derive_enum_fields_named(
                 }
             };
             if !attrs.iter().any(|attr| matches!(attr, Attr::Skip)) {
-                let ident = field.ident.unwrap();
+                let field_name = field.ident.unwrap();
                 let name = attrs
                     .iter()
                     .filter_map(|attr| match attr {
@@ -350,7 +484,7 @@ fn derive_enum_fields_named(
                     })
                     .next_back()
                     .unwrap_or({
-                        let mut name = ident.to_string();
+                        let mut name = field_name.to_string();
                         name.as_mut_str()[..1].make_ascii_uppercase();
                         name = name.replace('_', " ");
                         name
@@ -361,7 +495,7 @@ fn derive_enum_fields_named(
                 {
                     quote! { <#struct_name as ::livemod::LiveModRepr<#field_type>>::repr(&#struct_name(#args), &self) }
                 } else {
-                    quote! { ::livemod::LiveMod::repr_default(#ident) }
+                    quote! { ::livemod::LiveMod::repr_default(#field_name) }
                 };
                 Some((
                     (
@@ -373,19 +507,19 @@ fn derive_enum_fields_named(
                             }
                         },
                         quote! {
-                            #ident
+                            #field_name
                         }
                     ),
                     (
                         quote! {
-                            #name => #ident
+                            #name => #field_name
                         },
                         (
                             quote! {
-                                (#name.to_owned(), ::livemod::LiveMod::get_self(#ident))
+                                (#name.to_owned(), ::livemod::LiveMod::get_self(#field_name))
                             },
                             quote! {
-                                #ident: Default::default()
+                                #field_name: Default::default()
                             }
                         ),
                     )
@@ -547,10 +681,13 @@ fn derive_enum_fields_unnamed(
     )
 }
 
+*/
+
 enum Attr {
     Skip,
     Rename(String),
-    Repr(Ident, Punctuated<TokenStream, Token![,]>),
+    Repr(TokenStream),
+    Default(TokenStream),
 }
 
 impl Parse for Attr {
@@ -569,17 +706,7 @@ impl Parse for Attr {
             Ok(Attr::Rename(new_name.value()))
         } else if attr_type == "repr" {
             input.parse::<Token![=]>()?;
-            let struct_name = input.parse()?;
-            if !input.is_empty() {
-                let arguments;
-                parenthesized!(arguments in input);
-                Ok(Attr::Repr(
-                    struct_name,
-                    arguments.parse_terminated(TokenStream::parse)?,
-                ))
-            } else {
-                Ok(Attr::Repr(struct_name, Punctuated::new()))
-            }
+            Ok(Attr::Repr(input.parse()?))
         } else {
             Err(syn::Error::new(
                 attr_type.span(),
