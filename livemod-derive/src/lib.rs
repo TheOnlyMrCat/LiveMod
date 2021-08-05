@@ -1,6 +1,9 @@
 use proc_macro2::{Ident, Literal, Span, TokenStream};
 use quote::quote;
-use syn::{DataEnum, DeriveInput, Field, FieldsNamed, FieldsUnnamed, LitStr, Token, parenthesized, parse::Parse, punctuated::Punctuated};
+use syn::{
+    parenthesized, parse::Parse, punctuated::Punctuated, DataEnum, DeriveInput, Field, FieldsNamed,
+    FieldsUnnamed, LitStr, Token,
+};
 
 #[proc_macro_derive(LiveMod, attributes(livemod))]
 pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
@@ -9,7 +12,16 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
     match ast.data {
         syn::Data::Struct(st) => {
             let struct_name = ast.ident;
-            let (FieldsDerive { idents, default_values, representations, get_named_values, get_selves }, named) = match st.fields {
+            let (
+                FieldsDerive {
+                    idents,
+                    default_values,
+                    representations,
+                    get_named_values,
+                    get_selves,
+                },
+                named,
+            ) = match st.fields {
                 syn::Fields::Named(fields) => (derive_fields_named(fields), true),
                 syn::Fields::Unnamed(fields) => (derive_fields_unnamed(fields), false),
                 syn::Fields::Unit => {
@@ -77,30 +89,46 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
                 variant_names.push(variant_name.to_string());
                 match variant.fields {
                     syn::Fields::Named(fields) => {
-                        let FieldsDerive { idents, default_values, representations, get_named_values, get_selves } = derive_fields_named(fields);
+                        let FieldsDerive {
+                            idents,
+                            default_values,
+                            representations,
+                            get_named_values,
+                            get_selves,
+                        } = derive_fields_named(fields);
                         let self_pattern = quote! {
                             Self::#variant_name { #(#idents),* }
                         };
 
-                        variant_fields.push(quote! { #self_pattern => vec![#(#representations),*] });
+                        variant_fields
+                            .push(quote! { #self_pattern => vec![#(#representations),*] });
                         variant_get_named_values.push(quote! { #self_pattern => match name { #(#get_named_values ,)* _ => panic!("Unexpected value name!") } });
                         variant_defaults.push(quote! { #variant_string => Self::#variant_name { #(#idents: #default_values),* } });
                         variant_get_selves.push(quote! { #self_pattern => ::livemod::TrackedDataValue::Enum { variant: #variant_string.to_owned(), fields: vec![#(#get_selves),*] } })
-                    },
+                    }
                     syn::Fields::Unnamed(fields) => {
-                        let FieldsDerive { idents, default_values, representations, get_named_values, get_selves } = derive_fields_unnamed(fields);
+                        let FieldsDerive {
+                            idents,
+                            default_values,
+                            representations,
+                            get_named_values,
+                            get_selves,
+                        } = derive_fields_unnamed(fields);
                         let self_pattern = quote! {
                             Self::#variant_name ( #(#idents),* )
                         };
 
-                        variant_fields.push(quote! { #self_pattern => vec![#(#representations),*] });
+                        variant_fields
+                            .push(quote! { #self_pattern => vec![#(#representations),*] });
                         variant_get_named_values.push(quote! { #self_pattern => match name { #(#get_named_values ,)* _ => panic!("Unexpected value name!") } });
                         variant_defaults.push(quote! { #variant_string => Self::#variant_name ( #(#default_values),* ) });
                         variant_get_selves.push(quote! { #self_pattern => ::livemod::TrackedDataValue::Enum { variant: #variant_string.to_owned(), fields: vec![#(#get_selves),*] } })
                     }
                     syn::Fields::Unit => {
-                        variant_fields.push(quote!{ Self::#variant_name => vec![] });
-                        variant_get_named_values.push(quote! { Self::#variant_name => panic!("Unexpected value name!") });
+                        variant_fields.push(quote! { Self::#variant_name => vec![] });
+                        variant_get_named_values.push(
+                            quote! { Self::#variant_name => panic!("Unexpected value name!") },
+                        );
                         variant_defaults.push(quote! { #variant_string => Self::#variant_name });
                         variant_get_selves.push(quote! { Self::#variant_name => ::livemod::TrackedDataValue::Enum { variant: #variant_string.to_owned(), fields: vec![] } })
                     }
@@ -122,13 +150,13 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
                             triggers: vec![]
                         }
                     }
-        
+
                     fn get_named_value(&mut self, name: &str) -> &mut dyn ::livemod::LiveMod {
                         match self {
                             #(#variant_get_named_values ,)*
                         }
                     }
-        
+
                     fn trigger(&mut self, trigger: ::livemod::Trigger) -> bool {
                         let variant_name = trigger.try_into_set().unwrap().try_into_enum_variant().unwrap();
                         *self = match variant_name.as_str() {
@@ -137,7 +165,7 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
                         };
                         true
                     }
-        
+
                     fn get_self(&self) -> ::livemod::TrackedDataValue {
                         match self {
                             #(#variant_get_selves ,)*
@@ -146,7 +174,7 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
                 }
             };
             gen.into()
-        },
+        }
         syn::Data::Union(_) => {
             let gen = quote! {
                 compile_error!("Derive not supported on union")
@@ -224,7 +252,7 @@ fn derive_fields_unnamed(fields: FieldsUnnamed) -> FieldsDerive {
     gen
 }
 
-fn derive_field(ident: Ident, name: String, field: Field) -> FieldDerive {
+fn derive_field(ident: Ident, default_name: String, field: Field) -> FieldDerive {
     let attrs = match field
         .attrs
         .into_iter()
@@ -249,29 +277,48 @@ fn derive_field(ident: Ident, name: String, field: Field) -> FieldDerive {
         }
     };
 
-    let default_value = if let Some(default) = attrs.iter().find_map(|attr| match attr { Attr::Default(ts) => Some(ts), _ => None }) {
+    let default_value = if let Some(default) = attrs.iter().find_map(|attr| match attr {
+        Attr::Default(ts) => Some(ts),
+        _ => None,
+    }) {
         default.clone()
     } else {
         quote! { ::std::default::Default::default() }
     };
 
-    let (representation, get_named_value, get_self) = if attrs.iter().any(|attr| matches!(attr, Attr::Skip)) {
-        (None, None, None)
+    let name = if let Some(name) = attrs.iter().find_map(|attr| match attr {
+        Attr::Rename(name) => Some(name),
+        _ => None,
+    }) {
+        name.clone()
     } else {
-        let default_repr = quote! { ::livemod::DefaultRepr };
-        let repr_struct = attrs.iter().find_map(|attr| match attr { Attr::Repr(ts) => Some(ts), _ => None }).unwrap_or(&default_repr);
-        let representation = quote! {
-            ::livemod::TrackedData {
-                name: #name.to_owned(),
-                data_type: ::livemod::LiveModRepr::repr(&#repr_struct, #ident) ,
-                triggers: vec![]
-            }
-        };
-
-        let get_named_value = quote! { #name => #ident };
-        let get_self = quote! { (#name.to_owned(), ::livemod::LiveMod::get_self(#ident)) };
-        (Some(representation), Some(get_named_value), Some(get_self))
+        default_name
     };
+
+    let (representation, get_named_value, get_self) =
+        if attrs.iter().any(|attr| matches!(attr, Attr::Skip)) {
+            (None, None, None)
+        } else {
+            let default_repr = quote! { ::livemod::DefaultRepr };
+            let repr_struct = attrs
+                .iter()
+                .find_map(|attr| match attr {
+                    Attr::Repr(ts) => Some(ts),
+                    _ => None,
+                })
+                .unwrap_or(&default_repr);
+            let representation = quote! {
+                ::livemod::TrackedData {
+                    name: #name.to_owned(),
+                    data_type: ::livemod::LiveModRepr::repr(&#repr_struct, #ident) ,
+                    triggers: vec![]
+                }
+            };
+
+            let get_named_value = quote! { #name => #ident };
+            let get_self = quote! { (#name.to_owned(), ::livemod::LiveMod::get_self(#ident)) };
+            (Some(representation), Some(get_named_value), Some(get_self))
+        };
 
     FieldDerive {
         ident,
@@ -281,491 +328,6 @@ fn derive_field(ident: Ident, name: String, field: Field) -> FieldDerive {
         get_self,
     }
 }
-
-/*
-fn derive_fields_named(
-    fields: FieldsNamed,
-) -> (Vec<TokenStream>, Vec<TokenStream>, Vec<TokenStream>) {
-    let (fields, matches_gets) = fields
-        .named
-        .into_iter()
-        .filter_map(|field| {
-            let attrs = match field
-                .attrs
-                .into_iter()
-                .filter_map(|attr| {
-                    if attr.path.is_ident("livemod") {
-                        Some(syn::parse2(attr.tokens))
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Result<Vec<_>, _>>()
-            {
-                Ok(attrs) => attrs,
-                Err(error) => {
-                    let ident = field.ident.unwrap();
-                    let name = ident.to_string();
-                    return Some((
-                        error.to_compile_error(),
-                        (quote! { #name => &mut self.#ident }, quote! { (#name.to_owned(), ::livemod::LiveMod::get_self(&self.#ident)) }),
-                    ));
-                }
-            };
-            if !attrs.iter().any(|attr| matches!(attr, Attr::Skip)) {
-                let field_name = field.ident.unwrap();
-                let name = attrs
-                    .iter()
-                    .filter_map(|attr| match attr {
-                        Attr::Rename(name) => Some(name.clone()),
-                        _ => None,
-                    })
-                    .next_back()
-                    .unwrap_or({
-                        let mut name = field_name.to_string();
-                        name.as_mut_str()[..1].make_ascii_uppercase();
-                        name = name.replace('_', " ");
-                        name
-                    });
-                let field_type = field.ty;
-                let repr = if let Some(Attr::Repr(struct_name, args)) =
-                    attrs.iter().rfind(|attr| matches!(attr, Attr::Repr(_, _)))
-                {
-                    quote! { <_ as ::livemod::LiveModRepr<#field_type>>::repr(&#struct_name(#args), &self.#field_name) }
-                } else {
-                    quote! { ::livemod::LiveMod::repr_default(&self.#field_name) }
-                };
-                Some((
-                    quote! {
-                        ::livemod::TrackedData {
-                            name: String::from(#name),
-                            data_type: #repr,
-                            triggers: vec![],
-                        }
-                    },
-                    (
-                        quote! {
-                            #name => &mut self.#field_name
-                        },
-                        quote! {
-                            (#name.to_owned(), ::livemod::LiveMod::get_self(&self.#field_name))
-                        }
-                    )
-                ))
-            } else {
-                None
-            }
-        })
-        .unzip::<_, _, Vec<_>, Vec<_>>();
-
-    let (matches, gets) = matches_gets.into_iter().unzip::<_, _, Vec<_>, Vec<_>>();
-
-    (fields, matches, gets)
-}
-
-fn derive_fields_unnamed(
-    fields: FieldsUnnamed,
-) -> (Vec<TokenStream>, Vec<TokenStream>, Vec<TokenStream>) {
-    let (fields, matches_gets) = fields
-        .unnamed
-        .into_iter()
-        .enumerate()
-        .filter_map(|(i, field)| {
-            let attrs = match field
-                .attrs
-                .into_iter()
-                .filter_map(|attr| {
-                    if attr.path.is_ident("livemod") {
-                        Some(syn::parse2(attr.tokens))
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Result<Vec<_>, _>>()
-            {
-                Ok(attrs) => attrs,
-                Err(error) => {
-                    let name = i.to_string();
-                    let ident = Literal::usize_unsuffixed(i); //TODO: Set span
-                    return Some((
-                        error.to_compile_error(),
-                        (quote! { #name => &mut self.#ident }, quote! { (#name.to_owned(), ::livemod::LiveMod::get_self(&self.#ident)) }),
-                    ));
-                }
-            };
-            if !attrs.iter().any(|attr| matches!(attr, Attr::Skip)) {
-                let name = i.to_string();
-                let ident = Literal::usize_unsuffixed(i); //TODO: Set span
-                let field_type = field.ty;
-                let repr = if let Some(Attr::Repr(struct_name, args)) =
-                    attrs.iter().rfind(|attr| matches!(attr, Attr::Repr(_, _)))
-                {
-                    quote! { <_ as ::livemod::LiveModRepr<#field_type>>::repr(&#struct_name(#args), &self.#i) }
-                } else {
-                    quote! { ::livemod::LiveMod::repr_default(&self.#ident) }
-                };
-                Some((
-                    quote! {
-                        ::livemod::TrackedData {
-                            name: String::from(#name),
-                            data_type: #repr,
-                            triggers: vec![],
-                        }
-                    },
-                    (
-                        quote! {
-                            #name => &mut self.#ident
-                        },
-                        quote! {
-                            (#name.to_owned(), ::livemod::LiveMod::get_self(&self.#ident))
-                        }
-                    )
-                ))
-            } else {
-                None
-            }
-        })
-        .unzip::<_, _, Vec<_>, Vec<_>>();
-
-    let (matches, gets) = matches_gets.into_iter().unzip::<_, _, Vec<_>, Vec<_>>();
-
-    (fields, matches, gets)
-}
-
-fn derive_enum(enum_name: Ident, en: DataEnum) -> TokenStream {
-    let (variants_fields, matches_gets_defaults) = en
-        .variants
-        .into_iter()
-        .map(|variant| {
-            let ident = variant.ident;
-            let qualified_ident = quote! { #enum_name::#ident };
-            let stringified_ident = ident.to_string();
-
-            let (var_fields, var_matches, var_gets, var_default) = match variant.fields {
-                syn::Fields::Named(fields) => {
-                    derive_enum_fields_named(ident, qualified_ident, fields)
-                }
-                syn::Fields::Unnamed(fields) => {
-                    derive_enum_fields_unnamed(ident, qualified_ident, fields)
-                }
-                syn::Fields::Unit => (
-                    quote! { #qualified_ident => vec![] },
-                    quote! { #qualified_ident => panic!("Variant has no fields!") },
-                    quote! {
-                        #qualified_ident => ::livemod::TrackedDataValue::Enum {
-                            variant: #stringified_ident.to_owned(),
-                            fields: vec![]
-                        }
-                    },
-                    quote! { #stringified_ident => #qualified_ident },
-                ),
-            };
-
-            (
-                (
-                    quote! { #stringified_ident.to_owned() },
-                    quote! { #var_fields },
-                ),
-                (
-                    quote! { #var_matches },
-                    (quote! { #var_gets }, quote! { #var_default }),
-                ),
-            )
-        })
-        .unzip::<_, _, Vec<_>, Vec<_>>();
-
-    let (variants, fields) = variants_fields.into_iter().unzip::<_, _, Vec<_>, Vec<_>>();
-    let (matches, gets_defaults) = matches_gets_defaults
-        .into_iter()
-        .unzip::<_, _, Vec<_>, Vec<_>>();
-    let (gets, defaults) = gets_defaults.into_iter().unzip::<_, _, Vec<_>, Vec<_>>();
-
-    quote! {
-        #[automatically_derived]
-        impl ::livemod::LiveMod for #enum_name {
-            fn repr_default(&self) -> ::livemod::TrackedDataRepr {
-                ::livemod::TrackedDataRepr::Enum {
-                    name: String::from(stringify!(#enum_name)),
-                    variants: vec![
-                        #(#variants),*
-                    ],
-                    fields: match self {
-                        #(#fields ,)*
-                    },
-                    triggers: vec![]
-                }
-            }
-
-            fn get_named_value(&mut self, name: &str) -> &mut ::livemod::LiveMod {
-                match self {
-                    #(#matches ,)*
-                }
-            }
-
-            fn trigger(&mut self, trigger: ::livemod::Trigger) -> bool {
-                let variant_name = trigger.try_into_set().unwrap().try_into_enum_variant().unwrap();
-                *self = match variant_name.as_str() {
-                    #(#defaults ,)*
-                    name => panic!("Unknown variant name: {}", name)
-                };
-                true
-            }
-
-            fn get_self(&self) -> ::livemod::TrackedDataValue {
-                match self {
-                    #(#gets ,)*
-                }
-            }
-        }
-    }
-}
-
-fn derive_enum_fields_named(
-    ident: Ident,
-    qualified_ident: TokenStream,
-    fields: FieldsNamed,
-) -> (TokenStream, TokenStream, TokenStream, TokenStream) {
-    let stringified_ident = ident.to_string();
-    let (fields_idents, matches_gets_defaults) = fields
-        .named
-        .into_iter()
-        .filter_map(|field| {
-            let attrs = match field
-                .attrs
-                .into_iter()
-                .filter_map(|attr| {
-                    if attr.path.is_ident("livemod") {
-                        Some(syn::parse2(attr.tokens))
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Result<Vec<_>, _>>()
-            {
-                Ok(attrs) => attrs,
-                Err(error) => {
-                    let ident = field.ident.unwrap();
-                    let name = ident.to_string();
-                    return Some((
-                        (error.to_compile_error(), quote! { vec![] }),
-                        (
-                            quote! { #name => &mut self.#ident },
-                            (
-                                quote! { (#name.to_owned(), ::livemod::LiveMod::get_self(&self.#ident)) },
-                                quote! { #ident: Default::default() }
-                            )
-                        ),
-                    ));
-                }
-            };
-            if !attrs.iter().any(|attr| matches!(attr, Attr::Skip)) {
-                let field_name = field.ident.unwrap();
-                let name = attrs
-                    .iter()
-                    .filter_map(|attr| match attr {
-                        Attr::Rename(name) => Some(name.clone()),
-                        _ => None,
-                    })
-                    .next_back()
-                    .unwrap_or({
-                        let mut name = field_name.to_string();
-                        name.as_mut_str()[..1].make_ascii_uppercase();
-                        name = name.replace('_', " ");
-                        name
-                    });
-                let field_type = field.ty;
-                let repr = if let Some(Attr::Repr(struct_name, args)) =
-                    attrs.iter().rfind(|attr| matches!(attr, Attr::Repr(_, _)))
-                {
-                    quote! { <#struct_name as ::livemod::LiveModRepr<#field_type>>::repr(&#struct_name(#args), &self) }
-                } else {
-                    quote! { ::livemod::LiveMod::repr_default(#field_name) }
-                };
-                Some((
-                    (
-                        quote! {
-                            ::livemod::TrackedData {
-                                name: String::from(#name),
-                                data_type: #repr,
-                                triggers: vec![],
-                            }
-                        },
-                        quote! {
-                            #field_name
-                        }
-                    ),
-                    (
-                        quote! {
-                            #name => #field_name
-                        },
-                        (
-                            quote! {
-                                (#name.to_owned(), ::livemod::LiveMod::get_self(#field_name))
-                            },
-                            quote! {
-                                #field_name: Default::default()
-                            }
-                        ),
-                    )
-                ))
-            } else {
-                //TODO: Skipped fields can't be initialised...
-                None
-            }
-        })
-        .unzip::<_, _, Vec<_>, Vec<_>>();
-
-    let (fields, idents) = fields_idents.into_iter().unzip::<_, _, Vec<_>, Vec<_>>();
-    let (matches, gets_defaults) = matches_gets_defaults
-        .into_iter()
-        .unzip::<_, _, Vec<_>, Vec<_>>();
-    let (gets, defaults) = gets_defaults.into_iter().unzip::<_, _, Vec<_>, Vec<_>>();
-
-    let match_pattern = quote! { #qualified_ident { #(#idents ,)* .. } };
-    (
-        quote! {
-            #match_pattern => vec![#(#fields),*]
-        },
-        quote! {
-            #match_pattern => match name {
-                #(#matches ,)*
-                _ => panic!("No field {} in {}", name, #stringified_ident)
-            }
-        },
-        quote! {
-            #match_pattern => ::livemod::TrackedDataValue::Enum {
-                variant: #stringified_ident.to_owned(),
-                fields: vec![
-                    #(#gets),*
-                ]
-            }
-        },
-        quote! {
-            #stringified_ident => #qualified_ident {
-                #(#defaults),*
-            }
-        },
-    )
-}
-
-fn derive_enum_fields_unnamed(
-    ident: Ident,
-    qualified_ident: TokenStream,
-    fields: FieldsUnnamed,
-) -> (TokenStream, TokenStream, TokenStream, TokenStream) {
-    let stringified_ident = ident.to_string();
-    let (fields_indices, matches_gets_defaults) = fields
-        .unnamed
-        .into_iter()
-        .enumerate()
-        .filter_map(|(i, field)| {
-            let name = i.to_string();
-            let ident = Ident::new(&format!("__{}", name), Span::call_site()); //TODO: Set span
-            let attrs = match field
-                .attrs
-                .into_iter()
-                .filter_map(|attr| {
-                    if attr.path.is_ident("livemod") {
-                        Some(syn::parse2(attr.tokens))
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Result<Vec<_>, _>>()
-            {
-                Ok(attrs) => attrs,
-                Err(error) => {
-                    return Some((
-                        (error.to_compile_error(), ident.clone()),
-                        (
-                            quote! { #name => &mut #ident },
-                            (
-                                quote! { (#name.to_owned(), ::livemod::LiveMod::get_self(&#ident)) },
-                                quote! { Default::default() },
-                            ),
-                        ),
-                    ));
-                }
-            };
-            if !attrs.iter().any(|attr| matches!(attr, Attr::Skip)) {
-                let field_type = field.ty;
-                let repr = if let Some(Attr::Repr(struct_name, args)) =
-                    attrs.iter().rfind(|attr| matches!(attr, Attr::Repr(_, _)))
-                {
-                    quote! { <#struct_name as ::livemod::LiveModRepr<#field_type>>::repr(&#struct_name(#args), &self) }
-                } else {
-                    quote! { ::livemod::LiveMod::repr_default(#ident) }
-                };
-                Some((
-                    (
-                        quote! {
-                            ::livemod::TrackedData {
-                                name: String::from(#name),
-                                data_type: #repr,
-                                triggers: vec![],
-                            }
-                        },
-                        ident.clone(),
-                    ),
-                    (
-                        quote! {
-                            #name => #ident
-                        },
-                        (
-                            quote! {
-                                (#name.to_owned(), ::livemod::LiveMod::get_self(#ident))
-                            },
-                            quote! { Default::default() }
-                        )
-                    ),
-                ))
-            } else {
-                //TODO: Skipped fields can't be initialised.
-                None
-            }
-        })
-        .unzip::<_, _, Vec<_>, Vec<_>>();
-
-    let (fields, indices) = fields_indices.into_iter().unzip::<_, _, Vec<_>, Vec<_>>();
-    let (matches, gets_defaults) = matches_gets_defaults
-        .into_iter()
-        .unzip::<_, _, Vec<_>, Vec<_>>();
-    let (gets, defaults) = gets_defaults.into_iter().unzip::<_, _, Vec<_>, Vec<_>>();
-
-    let mut binding_names = vec![];
-    for (i, ident) in indices.into_iter().enumerate() {
-        while i > binding_names.len() {
-            binding_names.push(Ident::new("_", Span::call_site()));
-        }
-        binding_names.push(ident);
-    }
-
-    let match_pattern = quote! { #qualified_ident (#(#binding_names ,)* ..)};
-    (
-        quote! {
-            #match_pattern => vec![#(#fields),*]
-        },
-        quote! {
-            #match_pattern => match name {
-                #(#matches ,)*
-                _ => panic!("No field {} in {}", name, #stringified_ident)
-            }
-        },
-        quote! {
-            #match_pattern => ::livemod::TrackedDataValue::Enum {
-                variant: #stringified_ident.to_owned(),
-                fields: vec![
-                    #(#gets),*
-                ]
-            }
-        },
-        quote! {
-            #stringified_ident => #qualified_ident(#(#defaults),*)
-        },
-    )
-}
-
-*/
 
 enum Attr {
     Skip,
@@ -791,6 +353,9 @@ impl Parse for Attr {
         } else if attr_type == "repr" {
             input.parse::<Token![=]>()?;
             Ok(Attr::Repr(input.parse()?))
+        } else if attr_type == "default" {
+            input.parse::<Token![=]>()?;
+            Ok(Attr::Default(input.parse()?))
         } else {
             Err(syn::Error::new(
                 attr_type.span(),

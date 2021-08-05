@@ -19,7 +19,7 @@ fn main() {
     let _derived_tuple_struct = livemod.create_variable("Tuple struct", DerivedTuple::default());
     let derived_enum = livemod.create_variable(
         "Derived enum",
-        DerivedEnum::StructVariant { float_slider: 5.3 },
+        DerivedEnum::StructVariant { number: 32, float_slider: 5.3 },
     );
     let mut can_remove = Some(livemod.create_variable("Remove me", false));
     let _vector = livemod.create_variable("Vector", vec![6.4, 8.2]);
@@ -141,8 +141,10 @@ struct DerivedTuple(u32, u64);
 #[allow(clippy::enum_variant_names)]
 enum DerivedEnum {
     UnitVariant,
-    TupleVariant(f32, #[livemod(repr = Multiline)]String),
+    TupleVariant(f32, #[livemod(repr = Multiline)] String),
     StructVariant {
+        #[livemod(default = 69)]
+        number: u32,
         #[livemod(repr = Slider(0.0..=5.0))]
         float_slider: f32,
     },
