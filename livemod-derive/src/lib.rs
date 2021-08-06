@@ -1,8 +1,7 @@
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::quote;
 use syn::{
-    parenthesized, parse::Parse, DeriveInput, Field, FieldsNamed,
-    FieldsUnnamed, LitStr, Token,
+    parenthesized, parse::Parse, DeriveInput, Field, FieldsNamed, FieldsUnnamed, LitStr, Token,
 };
 
 #[proc_macro_derive(LiveMod, attributes(livemod))]
@@ -60,7 +59,15 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
                     }
 
                     fn trigger(&mut self, target: ::livemod::ActionTarget, trigger: ::livemod::Trigger) -> bool {
-                        panic!("Unexpected trigger operation!")
+                        let #self_pattern = self;
+                        if let Some((field, field_target)) = target.strip_one_field() {
+                            match field {
+                                #(#get_named_values as &mut dyn ::livemod::LiveMod,)*
+                                _ => panic!("Unexpected value name!"),
+                            }.trigger(field_target, trigger)
+                        } else {
+                            panic!("Unexpected trigger operation!")
+                        }
                     }
 
                     fn get_self(&self, target: ::livemod::ActionTarget) -> ::livemod::TrackedDataValue {

@@ -387,7 +387,7 @@ fn output_thread(
                     Trigger::Set(
                         TrackedDataValue::deserialize_bin(
                             &base64::decode_config(
-                                namespaced_name.last().unwrap(),
+                                segments.last().unwrap(),
                                 base64::STANDARD_NO_PAD,
                             )
                             .expect("Invalid base64 data received from viewer"),
@@ -431,7 +431,7 @@ fn output_thread(
                 // Trigger the action denoted by the last element of the name
                 if referenced_var.trigger(
                     ActionTarget::from_name_and_fields(namespaced_name),
-                    Trigger::Trigger((*namespaced_name.last().unwrap()).to_owned()),
+                    Trigger::Trigger((*segments.last().unwrap()).to_owned()),
                 ) {
                     let len = namespaced_name.len() - 1;
                     sender
