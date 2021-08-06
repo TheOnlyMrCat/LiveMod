@@ -7,7 +7,7 @@ pub struct LiveModHandle;
 impl LiveModHandle {
     #[inline(always)]
     pub fn new_gui() -> LiveModHandle {
-       LiveModHandle
+        LiveModHandle
     }
 
     #[inline(always)]

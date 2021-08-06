@@ -210,9 +210,14 @@ impl ActionTarget<'_, '_> {
     pub fn strip_one_field(&self) -> Option<(&str, ActionTarget)> {
         match self {
             Self::This => None,
-            Self::Field(fields) => {
-                Some((fields[0], if fields.len() > 1 { ActionTarget::Field(&fields[1..]) } else { ActionTarget::This }))
-            }
+            Self::Field(fields) => Some((
+                fields[0],
+                if fields.len() > 1 {
+                    ActionTarget::Field(&fields[1..])
+                } else {
+                    ActionTarget::This
+                },
+            )),
         }
     }
 }
@@ -280,12 +285,9 @@ pub struct Multiline;
 
 impl LiveModRepr<String> for Multiline {
     fn repr(&self, _cur: &String) -> TrackedDataRepr {
-        TrackedDataRepr::String {
-            multiline: true,
-        }
+        TrackedDataRepr::String { multiline: true }
     }
 }
-
 
 #[macro_export]
 macro_rules! livemod_static {
@@ -383,30 +385,36 @@ float_primitive_impl!(f32, f64);
 
 impl LiveMod for bool {
     fn repr_default(&self, target: ActionTarget) -> TrackedDataRepr {
+        debug_assert!(target.is_this());
         TrackedDataRepr::Bool
     }
 
     fn trigger(&mut self, target: ActionTarget, trigger: Trigger) -> bool {
+        debug_assert!(target.is_this());
         *self = *trigger.try_into_set().unwrap().as_bool().unwrap();
         false
     }
 
     fn get_self(&self, target: ActionTarget) -> TrackedDataValue {
+        debug_assert!(target.is_this());
         TrackedDataValue::Bool(*self)
     }
 }
 
 impl LiveMod for String {
     fn repr_default(&self, target: ActionTarget) -> TrackedDataRepr {
+        debug_assert!(target.is_this());
         TrackedDataRepr::String { multiline: false }
     }
 
     fn trigger(&mut self, target: ActionTarget, trigger: Trigger) -> bool {
+        debug_assert!(target.is_this());
         *self = trigger.try_into_set().unwrap().into_string().unwrap();
         false
     }
 
     fn get_self(&self, target: ActionTarget) -> TrackedDataValue {
+        debug_assert!(target.is_this());
         TrackedDataValue::String(self.clone())
     }
 }
@@ -449,7 +457,7 @@ where
                             self.remove(parts[0].parse().unwrap());
                         }
                     }
-                },
+                }
                 _ => panic!(),
             }
             true
@@ -483,18 +491,21 @@ impl<A, F: FnMut(&mut A)> TriggerFn<A, F> {
 
 impl<A, F: FnMut(&mut A)> LiveMod for TriggerFn<A, F> {
     fn repr_default(&self, target: ActionTarget) -> TrackedDataRepr {
+        debug_assert!(target.is_this());
         TrackedDataRepr::Trigger {
             name: "Call".to_owned(),
         }
     }
 
     fn trigger(&mut self, target: ActionTarget, trigger: Trigger) -> bool {
+        debug_assert!(target.is_this());
         trigger.try_into_trigger().unwrap();
         (self.func)(&mut self.arg);
         false
     }
 
     fn get_self(&self, target: ActionTarget) -> TrackedDataValue {
+        debug_assert!(target.is_this());
         TrackedDataValue::Trigger
     }
 }

@@ -1,7 +1,7 @@
-use proc_macro2::{Ident, Literal, Span, TokenStream};
+use proc_macro2::{Ident, Span, TokenStream};
 use quote::quote;
 use syn::{
-    parenthesized, parse::Parse, punctuated::Punctuated, DataEnum, DeriveInput, Field, FieldsNamed,
+    parenthesized, parse::Parse, DeriveInput, Field, FieldsNamed,
     FieldsUnnamed, LitStr, Token,
 };
 
@@ -15,7 +15,7 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
             let (
                 FieldsDerive {
                     idents,
-                    default_values,
+                    default_values: _,
                     representations,
                     get_named_values,
                     get_selves,
@@ -86,6 +86,7 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
             let mut variant_names = vec![];
             let mut variant_fields = vec![];
             let mut variant_get_named_values = vec![];
+            let mut variant_get_named_values_mut = vec![];
             let mut variant_defaults = vec![];
             let mut variant_get_selves = vec![];
 
@@ -108,7 +109,8 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
 
                         variant_fields
                             .push(quote! { #self_pattern => vec![#(#representations),*] });
-                        variant_get_named_values.push(quote! { #self_pattern => match name { #(#get_named_values ,)* _ => panic!("Unexpected value name!") } });
+                        variant_get_named_values.push(quote! { #self_pattern => match name { #(#get_named_values as &dyn ::livemod::LiveMod,)* _ => panic!("Unexpected value name!") } });
+                        variant_get_named_values_mut.push(quote! { #self_pattern => match name { #(#get_named_values as &mut dyn ::livemod::LiveMod,)* _ => panic!("Unexpected value name!") } });
                         variant_defaults.push(quote! { #variant_string => Self::#variant_name { #(#idents: #default_values),* } });
                         variant_get_selves.push(quote! { #self_pattern => ::livemod::TrackedDataValue::Enum { variant: #variant_string.to_owned(), fields: vec![#(#get_selves),*] } })
                     }
@@ -126,13 +128,17 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
 
                         variant_fields
                             .push(quote! { #self_pattern => vec![#(#representations),*] });
-                        variant_get_named_values.push(quote! { #self_pattern => match name { #(#get_named_values ,)* _ => panic!("Unexpected value name!") } });
+                        variant_get_named_values.push(quote! { #self_pattern => match name { #(#get_named_values as &dyn ::livemod::LiveMod,)* _ => panic!("Unexpected value name!") } });
+                        variant_get_named_values_mut.push(quote! { #self_pattern => match name { #(#get_named_values as &mut dyn ::livemod::LiveMod,)* _ => panic!("Unexpected value name!") } });
                         variant_defaults.push(quote! { #variant_string => Self::#variant_name ( #(#default_values),* ) });
                         variant_get_selves.push(quote! { #self_pattern => ::livemod::TrackedDataValue::Enum { variant: #variant_string.to_owned(), fields: vec![#(#get_selves),*] } })
                     }
                     syn::Fields::Unit => {
                         variant_fields.push(quote! { Self::#variant_name => vec![] });
                         variant_get_named_values.push(
+                            quote! { Self::#variant_name => panic!("Unexpected value name!") },
+                        );
+                        variant_get_named_values_mut.push(
                             quote! { Self::#variant_name => panic!("Unexpected value name!") },
                         );
                         variant_defaults.push(quote! { #variant_string => Self::#variant_name });
@@ -144,37 +150,49 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
             let gen = quote! {
                 #[automatically_derived]
                 impl ::livemod::LiveMod for #enum_name {
-                    fn repr_default(&self) -> ::livemod::TrackedDataRepr {
-                        ::livemod::TrackedDataRepr::Enum {
-                            name: String::from(stringify!(#enum_name)),
-                            variants: vec![
-                                #(#variant_names.to_owned()),*
-                            ],
-                            fields: match self {
-                                #(#variant_fields ,)*
-                            },
-                            triggers: vec![]
+                    fn repr_default(&self, target: ActionTarget) -> ::livemod::TrackedDataRepr {
+                        if let Some((name, field_target)) = target.strip_one_field() {
+                            match self {
+                                #(#variant_get_named_values ,)*
+                            }.repr_default(field_target)
+                        } else {
+                            ::livemod::TrackedDataRepr::Enum {
+                                name: String::from(stringify!(#enum_name)),
+                                variants: vec![
+                                    #(#variant_names.to_owned()),*
+                                ],
+                                fields: match self {
+                                    #(#variant_fields ,)*
+                                },
+                                triggers: vec![]
+                            }
                         }
                     }
 
-                    fn get_named_value(&mut self, name: &str) -> &mut dyn ::livemod::LiveMod {
-                        match self {
-                            #(#variant_get_named_values ,)*
+                    fn trigger(&mut self, target: ActionTarget, trigger: ::livemod::Trigger) -> bool {
+                        if let Some((name, field_target)) = target.strip_one_field() {
+                            match self {
+                                #(#variant_get_named_values_mut ,)*
+                            }.trigger(field_target, trigger)
+                        } else {
+                            let variant_name = trigger.try_into_set().unwrap().try_into_enum_variant().unwrap();
+                            *self = match variant_name.as_str() {
+                                #(#variant_defaults ,)*
+                                name => panic!("Unknown variant name: {}", name)
+                            };
+                            true
                         }
                     }
 
-                    fn trigger(&mut self, trigger: ::livemod::Trigger) -> bool {
-                        let variant_name = trigger.try_into_set().unwrap().try_into_enum_variant().unwrap();
-                        *self = match variant_name.as_str() {
-                            #(#variant_defaults ,)*
-                            name => panic!("Unknown variant name: {}", name)
-                        };
-                        true
-                    }
-
-                    fn get_self(&self) -> ::livemod::TrackedDataValue {
-                        match self {
-                            #(#variant_get_selves ,)*
+                    fn get_self(&self, target: ActionTarget) -> ::livemod::TrackedDataValue {
+                        if let Some((name, field_target)) = target.strip_one_field() {
+                            match self {
+                                #(#variant_get_named_values ,)*
+                            }.get_self(field_target)
+                        } else {
+                            match self {
+                                #(#variant_get_selves ,)*
+                            }
                         }
                     }
                 }
@@ -301,30 +319,32 @@ fn derive_field(ident: Ident, default_name: String, field: Field) -> FieldDerive
         default_name
     };
 
-    let (representation, get_named_value, get_self) =
-        if attrs.iter().any(|attr| matches!(attr, Attr::Skip)) {
-            (None, None, None)
-        } else {
-            let default_repr = quote! { ::livemod::DefaultRepr };
-            let repr_struct = attrs
-                .iter()
-                .find_map(|attr| match attr {
-                    Attr::Repr(ts) => Some(ts),
-                    _ => None,
-                })
-                .unwrap_or(&default_repr);
-            let representation = quote! {
-                ::livemod::TrackedData {
-                    name: #name.to_owned(),
-                    data_type: ::livemod::LiveModRepr::repr(&#repr_struct, #ident) ,
-                    triggers: vec![]
-                }
-            };
-
-            let get_named_value = quote! { #name => #ident };
-            let get_self = quote! { (#name.to_owned(), ::livemod::LiveMod::get_self(#ident, ::livemod::ActionTarget::This)) };
-            (Some(representation), Some(get_named_value), Some(get_self))
+    let (representation, get_named_value, get_self) = if attrs
+        .iter()
+        .any(|attr| matches!(attr, Attr::Skip))
+    {
+        (None, None, None)
+    } else {
+        let default_repr = quote! { ::livemod::DefaultRepr };
+        let repr_struct = attrs
+            .iter()
+            .find_map(|attr| match attr {
+                Attr::Repr(ts) => Some(ts),
+                _ => None,
+            })
+            .unwrap_or(&default_repr);
+        let representation = quote! {
+            ::livemod::TrackedData {
+                name: #name.to_owned(),
+                data_type: ::livemod::LiveModRepr::repr(&#repr_struct, #ident) ,
+                triggers: vec![]
+            }
         };
+
+        let get_named_value = quote! { #name => #ident };
+        let get_self = quote! { (#name.to_owned(), ::livemod::LiveMod::get_self(#ident, ::livemod::ActionTarget::This)) };
+        (Some(representation), Some(get_named_value), Some(get_self))
+    };
 
     FieldDerive {
         ident,

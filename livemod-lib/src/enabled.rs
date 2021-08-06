@@ -279,7 +279,10 @@ fn input_thread(
                         var.repr_default(ActionTarget::This).serialize_bin(),
                         base64::STANDARD_NO_PAD
                     ),
-                    base64::encode_config(var.get_self(ActionTarget::This).serialize_bin(), base64::STANDARD_NO_PAD),
+                    base64::encode_config(
+                        var.get_self(ActionTarget::This).serialize_bin(),
+                        base64::STANDARD_NO_PAD
+                    ),
                 )
                 .unwrap();
                 variables.write().insert(name, handle);
@@ -290,14 +293,17 @@ fn input_thread(
                     input,
                     "s{};{}",
                     &name,
-                    base64::encode_config(var.get_self(ActionTarget::This).serialize_bin(), base64::STANDARD_NO_PAD),
+                    base64::encode_config(
+                        var.get_self(ActionTarget::This).serialize_bin(),
+                        base64::STANDARD_NO_PAD
+                    ),
                 )
                 .unwrap();
             }
             Message::UpdatedRepr(path) => {
                 // Get the 'base' variable from our HashMap
                 let base = path.first().unwrap();
-                let mut var_handle =
+                let var_handle =
                     unsafe { &mut *variables.read().get(base).unwrap().var.as_ref().lock() };
 
                 let path_ref = path.iter().map(|s| s.as_str()).collect::<Vec<_>>();
@@ -308,11 +314,15 @@ fn input_thread(
                     path.iter()
                         .fold(String::new(), |acc, v| format!("{}:{}", acc, v)),
                     base64::encode_config(
-                        var_handle.repr_default(ActionTarget::from_name_and_fields(&path_ref)).serialize_bin(),
+                        var_handle
+                            .repr_default(ActionTarget::from_name_and_fields(&path_ref))
+                            .serialize_bin(),
                         base64::STANDARD_NO_PAD
                     ),
                     base64::encode_config(
-                        var_handle.get_self(ActionTarget::from_name_and_fields(&path_ref)).serialize_bin(),
+                        var_handle
+                            .get_self(ActionTarget::from_name_and_fields(&path_ref))
+                            .serialize_bin(),
                         base64::STANDARD_NO_PAD
                     ),
                 )
@@ -357,7 +367,7 @@ fn output_thread(
 
                 // Get the 'base' variable from our HashMap
                 let base = namespaced_name.first().unwrap();
-                let mut referenced_var = unsafe {
+                let referenced_var = unsafe {
                     &mut *match variables.read().get(*base) {
                         Some(base_handle) => base_handle,
                         None => {
@@ -372,23 +382,22 @@ fn output_thread(
                 };
 
                 // Set the variable
-                if referenced_var.trigger(ActionTarget::from_name_and_fields(namespaced_name), Trigger::Set(
-                    TrackedDataValue::deserialize_bin(
-                        &base64::decode_config(
-                            namespaced_name.last().unwrap(),
-                            base64::STANDARD_NO_PAD,
+                if referenced_var.trigger(
+                    ActionTarget::from_name_and_fields(namespaced_name),
+                    Trigger::Set(
+                        TrackedDataValue::deserialize_bin(
+                            &base64::decode_config(
+                                namespaced_name.last().unwrap(),
+                                base64::STANDARD_NO_PAD,
+                            )
+                            .expect("Invalid base64 data received from viewer"),
                         )
-                        .expect("Invalid base64 data received from viewer"),
-                    )
-                    .expect("Invalid data received from viewer"),
-                )) {
-                    let len = namespaced_name.len() - 1;
+                        .expect("Invalid data received from viewer"),
+                    ),
+                ) {
                     sender
                         .send(Message::UpdatedRepr(
-                            namespaced_name
-                                .into_iter()
-                                .map(|&s| s.to_owned())
-                                .collect(),
+                            namespaced_name.iter().map(|&s| s.to_owned()).collect(),
                         ))
                         .unwrap();
                 }
@@ -405,7 +414,7 @@ fn output_thread(
 
                 // Get the 'base' variable from our HashMap
                 let base = namespaced_name.first().unwrap();
-                let mut referenced_var = unsafe {
+                let referenced_var = unsafe {
                     &mut *match variables.read().get(*base) {
                         Some(base_handle) => base_handle,
                         None => {
@@ -420,14 +429,15 @@ fn output_thread(
                 };
 
                 // Trigger the action denoted by the last element of the name
-                if referenced_var.trigger(ActionTarget::from_name_and_fields(namespaced_name), Trigger::Trigger(
-                    (*namespaced_name.last().unwrap()).to_owned(),
-                )) {
+                if referenced_var.trigger(
+                    ActionTarget::from_name_and_fields(namespaced_name),
+                    Trigger::Trigger((*namespaced_name.last().unwrap()).to_owned()),
+                ) {
                     let len = namespaced_name.len() - 1;
                     sender
                         .send(Message::UpdatedRepr(
                             namespaced_name
-                                .into_iter()
+                                .iter()
                                 .take(len)
                                 .map(|&s| s.to_owned())
                                 .collect(),
