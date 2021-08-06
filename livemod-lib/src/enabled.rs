@@ -10,7 +10,7 @@ use std::sync::{Arc, Barrier};
 use nanoserde::{DeBin, SerBin};
 use parking_lot::{Mutex, MutexGuard, RwLock};
 
-use crate::{LiveMod, TrackedDataValue, Trigger};
+use crate::{ActionTarget, LiveMod, TrackedDataValue, Trigger};
 
 /// A handle to an external livemod viewer.
 ///
@@ -276,10 +276,10 @@ fn input_thread(
                     "n{};{};{}",
                     &name,
                     base64::encode_config(
-                        var.repr_default().serialize_bin(),
+                        var.repr_default(ActionTarget::This).serialize_bin(),
                         base64::STANDARD_NO_PAD
                     ),
-                    base64::encode_config(var.get_self().serialize_bin(), base64::STANDARD_NO_PAD),
+                    base64::encode_config(var.get_self(ActionTarget::This).serialize_bin(), base64::STANDARD_NO_PAD),
                 )
                 .unwrap();
                 variables.write().insert(name, handle);
@@ -290,7 +290,7 @@ fn input_thread(
                     input,
                     "s{};{}",
                     &name,
-                    base64::encode_config(var.get_self().serialize_bin(), base64::STANDARD_NO_PAD),
+                    base64::encode_config(var.get_self(ActionTarget::This).serialize_bin(), base64::STANDARD_NO_PAD),
                 )
                 .unwrap();
             }
@@ -300,25 +300,19 @@ fn input_thread(
                 let mut var_handle =
                     unsafe { &mut *variables.read().get(base).unwrap().var.as_ref().lock() };
 
-                // Follow the 'path' of field names, if needed
-                if path.len() > 2 {
-                    for name in &path[1..=path.len() - 2] {
-                        var_handle = var_handle.get_named_value(name);
-                    }
-                }
+                let path_ref = path.iter().map(|s| s.as_str()).collect::<Vec<_>>();
 
                 writeln!(
                     input,
                     "u{};{};{}",
-                    path.into_iter()
-                        .reduce(|acc, v| format!("{}:{}", acc, v))
-                        .unwrap(),
+                    path.iter()
+                        .fold(String::new(), |acc, v| format!("{}:{}", acc, v)),
                     base64::encode_config(
-                        var_handle.repr_default().serialize_bin(),
+                        var_handle.repr_default(ActionTarget::from_name_and_fields(&path_ref)).serialize_bin(),
                         base64::STANDARD_NO_PAD
                     ),
                     base64::encode_config(
-                        var_handle.get_self().serialize_bin(),
+                        var_handle.get_self(ActionTarget::from_name_and_fields(&path_ref)).serialize_bin(),
                         base64::STANDARD_NO_PAD
                     ),
                 )
@@ -353,11 +347,13 @@ fn output_thread(
             }
             b's' => {
                 // Data is to be changed
-                let namespaced_name = line[2..] // Not [1..], because the first character of the name will be ':'
+                let segments = line[2..] // Not [1..], because the first character of the name will be ':'
                     .split(|&b| b == b':' || b == b';')
                     .map(std::str::from_utf8)
                     .collect::<Result<Vec<_>, _>>()
                     .expect("Invalid text encoding received from viewer");
+
+                let namespaced_name = &segments[..=segments.len() - 2];
 
                 // Get the 'base' variable from our HashMap
                 let base = namespaced_name.first().unwrap();
@@ -375,15 +371,8 @@ fn output_thread(
                     .lock()
                 };
 
-                // Follow the 'path' of field names, if needed, ignoring the part after ';'
-                if namespaced_name.len() > 2 {
-                    for name in &namespaced_name[1..=namespaced_name.len() - 2] {
-                        referenced_var = referenced_var.get_named_value(name);
-                    }
-                }
-
                 // Set the variable
-                if referenced_var.trigger(Trigger::Set(
+                if referenced_var.trigger(ActionTarget::from_name_and_fields(namespaced_name), Trigger::Set(
                     TrackedDataValue::deserialize_bin(
                         &base64::decode_config(
                             namespaced_name.last().unwrap(),
@@ -398,8 +387,7 @@ fn output_thread(
                         .send(Message::UpdatedRepr(
                             namespaced_name
                                 .into_iter()
-                                .take(len)
-                                .map(str::to_owned)
+                                .map(|&s| s.to_owned())
                                 .collect(),
                         ))
                         .unwrap();
@@ -407,11 +395,13 @@ fn output_thread(
             }
             b't' => {
                 // A trigger on an object
-                let namespaced_name = line[2..] // Not [1..], because the first character of the name will be ':'
+                let segments = line[2..] // Not [1..], because the first character of the name will be ':'
                     .split(|&b| b == b':' || b == b';')
                     .map(std::str::from_utf8)
                     .collect::<Result<Vec<_>, _>>()
                     .expect("Invalid text encoding received from viewer");
+
+                let namespaced_name = &segments[..=segments.len() - 2];
 
                 // Get the 'base' variable from our HashMap
                 let base = namespaced_name.first().unwrap();
@@ -429,15 +419,8 @@ fn output_thread(
                     .lock()
                 };
 
-                // Follow the 'path' of field names, if needed, ignoring the part after ';'
-                if namespaced_name.len() > 2 {
-                    for name in &namespaced_name[1..=namespaced_name.len() - 2] {
-                        referenced_var = referenced_var.get_named_value(name);
-                    }
-                }
-
                 // Trigger the action denoted by the last element of the name
-                if referenced_var.trigger(Trigger::Trigger(
+                if referenced_var.trigger(ActionTarget::from_name_and_fields(namespaced_name), Trigger::Trigger(
                     (*namespaced_name.last().unwrap()).to_owned(),
                 )) {
                     let len = namespaced_name.len() - 1;
@@ -446,7 +429,7 @@ fn output_thread(
                             namespaced_name
                                 .into_iter()
                                 .take(len)
-                                .map(str::to_owned)
+                                .map(|&s| s.to_owned())
                                 .collect(),
                         ))
                         .unwrap();
