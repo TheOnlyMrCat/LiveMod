@@ -1,10 +1,21 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader};
 use std::sync::mpsc::{self, Sender};
 
 use glium::glutin;
-use livemod::{TrackedData, TrackedDataRepr, TrackedDataValue};
-use nanoserde::{DeBin, SerBin};
+use livemod::{Namespaced, Parameter};
+
+enum TrackedParameter {
+    SignedInt(i64),
+    UnsignedInt(u64),
+    Float(f64),
+    Bool(bool),
+    String(String),
+    Namespaced {
+        name: Vec<String>,
+        params: HashSet<String>,
+    },
+}
 
 fn create_display(event_loop: &glutin::event_loop::EventLoop<()>) -> glium::Display {
     let window_builder = glutin::window::WindowBuilder::new()
@@ -34,76 +45,58 @@ fn main() {
     let mut egui = egui_glium::EguiGlium::new(&display);
 
     let mut cached_shapes = None;
-    let mut current_variables = Vec::new();
-    let mut values = Values::default();
-    let mut modified_variables = Vec::new();
+    let mut tracked_variables = HashMap::new();
+    let mut tracked_data = HashMap::new();
+    let mut modified_data = Vec::new();
     let mut quit = false;
 
     event_loop.run(move |event, _, control_flow| match event {
         glutin::event::Event::MainEventsCleared => {
             while let Ok(msg) = recv.try_recv() {
-                fn recursive_namespaced_insert(
-                    namespaced_name: String,
-                    value: TrackedDataValue,
-                    values: &mut Values,
+                fn recursive_insert(
+                    name: String,
+                    param: Parameter<Value>,
+                    tracked_params: &mut HashMap<String, TrackedParameter>,
                 ) {
-                    match value {
-                        TrackedDataValue::SignedInt(i) => {
-                            values.i64.insert(namespaced_name, i);
-                        }
-                        TrackedDataValue::UnsignedInt(u) => {
-                            values.u64.insert(namespaced_name, u);
-                        }
-                        TrackedDataValue::Float(f) => {
-                            values.f64.insert(namespaced_name, f);
-                        }
-                        TrackedDataValue::Bool(b) => {
-                            values.bool.insert(namespaced_name, b);
-                        }
-                        TrackedDataValue::String(s) => {
-                            values.str.insert(namespaced_name, s);
-                        }
-                        TrackedDataValue::Struct(fields) => {
-                            for (field_name, field_value) in fields {
-                                let name = format!("{}:{}", namespaced_name, field_name);
-                                recursive_namespaced_insert(name, field_value, values);
+                    let parameter = match param {
+                        Parameter::SignedInt(value) => TrackedParameter::SignedInt(value),
+                        Parameter::UnsignedInt(value) => TrackedParameter::UnsignedInt(value),
+                        Parameter::Float(value) => TrackedParameter::Float(value),
+                        Parameter::Bool(value) => TrackedParameter::Bool(value),
+                        Parameter::String(value) => TrackedParameter::String(value),
+                        Parameter::Namespaced(namespaced) => {
+                            TrackedParameter::Namespaced {
+                                name: namespaced.name,
+                                params: namespaced.params.iter()
+                                    .inspect(|k, v| recursive_insert(
+                                        format!("{}.{}", name, k),
+                                        v,
+                                        tracked_params
+                                    ))
+                                    .map(|k, _| k)
+                                    .collect(),
                             }
                         }
-                        TrackedDataValue::Enum { variant, fields } => {
-                            values.enum_variant.insert(namespaced_name.clone(), variant);
-                            for (field_name, field_value) in fields {
-                                let name = format!("{}:{}", namespaced_name, field_name);
-                                recursive_namespaced_insert(name, field_value, values);
-                            }
-                        }
-                        TrackedDataValue::EnumVariant(_) => {} // This will never be sent to us, so ignore it.
-                        TrackedDataValue::Trigger => {}
-                    }
+                    };
+                    tracked_params.insert(name, parameter);
                 }
 
                 match msg {
                     Message::NewData(name, data, initial_value) => {
-                        recursive_namespaced_insert(
-                            format!(":{}", &name),
+                        recursive_insert(
+                            format!("{}", &name),
                             initial_value,
                             &mut values,
                         );
-                        current_variables.push(TrackedData {
-                            name,
-                            data_type: data,
-                            triggers: vec![],
-                        });
+                        tracked_variables.insert(name, data);
                     }
                     Message::UpdateRepr(path, data, value) => {
-                        recursive_namespaced_insert(format!(":{}", path), value, &mut values);
+                        recursive_insert(path.clone(), value, &mut tracked_params);
 
-                        let namespaced_name = path.split(':').collect::<Vec<_>>();
+                        let namespaced_name = path.split('.').collect::<Vec<_>>();
 
                         // Get base variable
-                        let mut value = current_variables
-                            .iter_mut()
-                            .find(|var| var.name == namespaced_name[0])
-                            .unwrap();
+                        let mut value = tracked_variables[namespaced_name[0]];
 
                         // Iterate into fields
                         for name in &namespaced_name[1..] {
@@ -119,15 +112,10 @@ fn main() {
                         value.data_type = data;
                     }
                     Message::UpdateData(name, value) => {
-                        recursive_namespaced_insert(format!(":{}", name), value, &mut values);
+                        recursive_insert(name, value, &mut tracked_params);
                     }
                     Message::RemoveData(name) => {
-                        current_variables.remove(
-                            current_variables
-                                .iter()
-                                .position(|d| name == d.name)
-                                .unwrap(),
-                        );
+                        tracked_variables.remove(name);
                     }
                     Message::Quit => {
                         quit = true;
@@ -145,15 +133,15 @@ fn main() {
                         recursive_ui(
                             ui,
                             &mut values,
-                            &mut modified_variables,
-                            current_variables.iter(),
+                            &mut modified_data,
+                            tracked_variables.iter(),
                             std::iter::empty(),
                             String::new(),
                         )
                     });
             });
 
-            for (name, value) in modified_variables.drain(..) {
+            for (name, value) in modified_data.drain(..) {
                 if let TrackedDataValue::Trigger = value {
                     println!("t{}", name,)
                 } else {
@@ -201,16 +189,6 @@ fn main() {
         }
         _ => (),
     });
-}
-
-#[derive(Default, Debug)]
-struct Values {
-    i64: HashMap<String, i64>,
-    u64: HashMap<String, u64>,
-    f64: HashMap<String, f64>,
-    bool: HashMap<String, bool>,
-    str: HashMap<String, String>,
-    enum_variant: HashMap<String, String>,
 }
 
 enum Message {

@@ -7,10 +7,9 @@ use std::ptr::NonNull;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Barrier};
 
-use nanoserde::{DeBin, SerBin};
 use parking_lot::{Mutex, MutexGuard, RwLock};
 
-use crate::{ActionTarget, LiveMod, TrackedDataValue, Trigger};
+use crate::{ActionTarget, LiveMod, Parameter};
 
 /// A handle to an external livemod viewer.
 ///
@@ -86,7 +85,7 @@ impl LiveModHandle {
     /// Create a variable and send it to the external viewer to be tracked.
     ///
     /// The variable will be removed from the external viewer when it is dropped.
-    pub fn create_variable<'a, T: LiveMod + 'a>(&self, name: &str, var: T) -> ModVar<T> {
+    pub fn create_variable<T: LiveMod + 'static>(&self, name: &str, var: T) -> ModVar<T> {
         let mod_var = ModVar {
             name: name.to_owned(),
             value: Box::new(Mutex::new(var)),
@@ -94,14 +93,33 @@ impl LiveModHandle {
             variables: self.variables.clone(),
         };
         let var_handle = ModVarHandle {
-            var: unsafe {
-                // SAFETY: The handle's value is stored on the heap, explicitly removed from the external viewer
-                // if it is dropped, but remaining valid if forgotten.
-                std::mem::transmute::<
+            var: NonNull::from(&*mod_var.value)
+        };
+        self.sender
+            .send(Message::NewVariable(name.to_owned(), var_handle))
+            .unwrap();
+        //TODO: Duplicate name prevention
+        mod_var
+    }
+
+    /// Create a variable and send it to the external viewer to be tracked.
+    ///
+    /// The variable will be removed from the external viewer when it is dropped.
+    ///
+    /// # Safety
+    /// You must ensure the returned variable is dropped before any of the variables it references.
+    pub unsafe fn create_variable_unchecked<'a, T: LiveMod + 'a>(&self, name: &str, var: T) -> ModVar<T> {
+        let mod_var = ModVar {
+            name: name.to_owned(),
+            value: Box::new(Mutex::new(var)),
+            sender: self.sender.clone(),
+            variables: self.variables.clone(),
+        };
+        let var_handle = ModVarHandle {
+            var: std::mem::transmute::<
                     NonNull<Mutex<dyn LiveMod + 'a>>,
                     NonNull<Mutex<dyn LiveMod + 'static>>,
                 >(NonNull::from(&*mod_var.value))
-            },
         };
         self.sender
             .send(Message::NewVariable(name.to_owned(), var_handle))
@@ -218,6 +236,7 @@ impl UpdateMessage<'_> {
             handle: ModVarHandle {
                 var: unsafe {
                     // SAFETY: The value lives as long as the ModVar which we are borrowing
+                    //TODO: Check soundness of reference
                     std::mem::transmute::<
                         NonNull<Mutex<dyn LiveMod + 'a>>,
                         NonNull<Mutex<dyn LiveMod + 'static>>,
@@ -275,14 +294,8 @@ fn input_thread(
                     input,
                     "n{};{};{}",
                     &name,
-                    base64::encode_config(
-                        var.repr_default(ActionTarget::This).serialize_bin(),
-                        base64::STANDARD_NO_PAD
-                    ),
-                    base64::encode_config(
-                        var.get_self(ActionTarget::This).serialize_bin(),
-                        base64::STANDARD_NO_PAD
-                    ),
+                    var.repr_default(ActionTarget::This).serialize(),
+                    var.get_self(ActionTarget::This).serialize(),
                 )
                 .unwrap();
                 variables.write().insert(name, handle);
@@ -293,10 +306,7 @@ fn input_thread(
                     input,
                     "s{};{}",
                     &name,
-                    base64::encode_config(
-                        var.get_self(ActionTarget::This).serialize_bin(),
-                        base64::STANDARD_NO_PAD
-                    ),
+                    var.get_self(ActionTarget::This).serialize(),
                 )
                 .unwrap();
             }
@@ -313,18 +323,12 @@ fn input_thread(
                     "u{};{};{}",
                     path.iter()
                         .fold(String::new(), |acc, v| format!("{}:{}", acc, v)),
-                    base64::encode_config(
-                        var_handle
-                            .repr_default(ActionTarget::from_name_and_fields(&path_ref))
-                            .serialize_bin(),
-                        base64::STANDARD_NO_PAD
-                    ),
-                    base64::encode_config(
-                        var_handle
-                            .get_self(ActionTarget::from_name_and_fields(&path_ref))
-                            .serialize_bin(),
-                        base64::STANDARD_NO_PAD
-                    ),
+                    var_handle
+                        .repr_default(ActionTarget::from_name_and_fields(&path_ref))
+                        .serialize(),
+                    var_handle
+                        .get_self(ActionTarget::from_name_and_fields(&path_ref))
+                        .serialize(),
                 )
                 .unwrap();
             }
@@ -357,13 +361,13 @@ fn output_thread(
             }
             b's' => {
                 // Data is to be changed
-                let segments = line[2..] // Not [1..], because the first character of the name will be ':'
-                    .split(|&b| b == b':' || b == b';')
+                let segments = line[1..]
+                    .split(|&b| b == b';')
                     .map(std::str::from_utf8)
-                    .collect::<Result<Vec<_>, _>>()
+                    .collect::<Result<Vec<&str>, _>>()
                     .expect("Invalid text encoding received from viewer");
 
-                let namespaced_name = &segments[..=segments.len() - 2];
+                let namespaced_name = segments[0].split(':').collect::<Vec<_>>();
 
                 // Get the 'base' variable from our HashMap
                 let base = namespaced_name.first().unwrap();
@@ -382,65 +386,15 @@ fn output_thread(
                 };
 
                 // Set the variable
-                if referenced_var.trigger(
-                    ActionTarget::from_name_and_fields(namespaced_name),
-                    Trigger::Set(
-                        TrackedDataValue::deserialize_bin(
-                            &base64::decode_config(
-                                segments.last().unwrap(),
-                                base64::STANDARD_NO_PAD,
-                            )
-                            .expect("Invalid base64 data received from viewer"),
-                        )
-                        .expect("Invalid data received from viewer"),
-                    ),
+                if referenced_var.accept(
+                    ActionTarget::from_name_and_fields(&namespaced_name),
+                    Parameter::deserialize(
+                        segments.last().unwrap()
+                    ).unwrap(),
                 ) {
                     sender
                         .send(Message::UpdatedRepr(
                             namespaced_name.iter().map(|&s| s.to_owned()).collect(),
-                        ))
-                        .unwrap();
-                }
-            }
-            b't' => {
-                // A trigger on an object
-                let segments = line[2..] // Not [1..], because the first character of the name will be ':'
-                    .split(|&b| b == b':' || b == b';')
-                    .map(std::str::from_utf8)
-                    .collect::<Result<Vec<_>, _>>()
-                    .expect("Invalid text encoding received from viewer");
-
-                let namespaced_name = &segments[..=segments.len() - 2];
-
-                // Get the 'base' variable from our HashMap
-                let base = namespaced_name.first().unwrap();
-                let referenced_var = unsafe {
-                    &mut *match variables.read().get(*base) {
-                        Some(base_handle) => base_handle,
-                        None => {
-                            // The variable has already been removed
-                            continue;
-                        }
-                    }
-                    .var
-                    // SAFETY: Pointers are valid as long as they are in the map
-                    .as_ref()
-                    .lock()
-                };
-
-                // Trigger the action denoted by the last element of the name
-                if referenced_var.trigger(
-                    ActionTarget::from_name_and_fields(namespaced_name),
-                    Trigger::Trigger((*segments.last().unwrap()).to_owned()),
-                ) {
-                    let len = namespaced_name.len() - 1;
-                    sender
-                        .send(Message::UpdatedRepr(
-                            namespaced_name
-                                .iter()
-                                .take(len)
-                                .map(|&s| s.to_owned())
-                                .collect(),
                         ))
                         .unwrap();
                 }

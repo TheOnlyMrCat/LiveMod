@@ -697,9 +697,7 @@ dependencies = [
 name = "livemod"
 version = "0.4.0"
 dependencies = [
- "base64",
  "livemod-derive",
- "nanoserde",
  "parking_lot",
 ]
 
