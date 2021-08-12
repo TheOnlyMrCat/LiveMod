@@ -159,6 +159,54 @@ impl<T> Parameter<T> {
             Err(self)
         }
     }
+
+    pub fn as_signed_int(&self) -> Option<&i64> {
+        if let Self::SignedInt(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_unsigned_int(&self) -> Option<&u64> {
+        if let Self::UnsignedInt(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_float(&self) -> Option<&f64> {
+        if let Self::Float(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_bool(&self) -> Option<&bool> {
+        if let Self::Bool(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_string(&self) -> Option<&String> {
+        if let Self::String(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_namespaced(&self) -> Option<&Namespaced<T>> {
+        if let Self::Namespaced(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
