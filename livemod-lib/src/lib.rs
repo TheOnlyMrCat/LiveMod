@@ -108,7 +108,7 @@ impl<T> Parameter<T> {
             b't' => Ok(Parameter::Bool(true)),
             b'f' => Ok(Parameter::Bool(false)),
             b'\"' => Ok(Parameter::String(s[1..s.len() - 2].to_owned())),
-            _ => Ok(Parameter::Namespaced(Namespaced::deserialize(&s)?))
+            _ => Ok(Parameter::Namespaced(Namespaced::deserialize(&s)?)),
         }
     }
 
@@ -233,7 +233,7 @@ impl<T> Namespaced<T> {
             s.push('=');
             s.push_str(&v.serialize());
             s.push(',');
-        };
+        }
         s.push_str("}");
         s
     }
@@ -243,7 +243,15 @@ impl<T> Namespaced<T> {
         let name = name.split(':').map(|s| s.trim().to_owned()).collect();
 
         let mut parameters = HashMap::new();
-        for s in params.split(',') {
+        let mut nested_level = 0;
+        for s in params[..params.len() - 1].split(|c| {
+            match c {
+                '{' => { nested_level += 1; false },
+                '}' => { nested_level -= 1; false },
+                ',' if nested_level == 0 => true,
+                _ => false,
+            }
+        }) {
             if s.is_empty() {
                 continue;
             }
@@ -260,7 +268,7 @@ impl<T> Namespaced<T> {
     }
 }
 impl Namespaced<Repr> {
-    pub fn new_basic_structure(
+    pub fn basic_structure_repr(
         name: &str,
         fields: &[(String, Namespaced<Repr>)],
     ) -> Namespaced<Repr> {
@@ -272,11 +280,9 @@ impl Namespaced<Repr> {
                     "fields".to_owned(),
                     Parameter::Namespaced(Namespaced {
                         name: vec!["livemod".to_owned(), "fields".to_owned()],
-                        parameters: HashMap::from_iter(
-                            fields.iter().map(|(name, field)| {
-                                (name.to_owned(), Parameter::Namespaced(field.clone()))
-                            }),
-                        ),
+                        parameters: HashMap::from_iter(fields.iter().map(|(name, field)| {
+                            (name.to_owned(), Parameter::Namespaced(field.clone()))
+                        })),
                         _marker: std::marker::PhantomData,
                     }),
                 ),
@@ -287,15 +293,13 @@ impl Namespaced<Repr> {
 }
 
 impl Namespaced<Value> {
-    pub fn new_basic_structure(
-        fields: &[(String, Namespaced<Value>)],
-    ) -> Namespaced<Value> {
+    pub fn basic_structure_value(fields: &[(String, Parameter<Value>)]) -> Namespaced<Value> {
         Namespaced {
             name: vec!["livemod".to_owned(), "struct".to_owned()],
             parameters: HashMap::from_iter(
                 fields
                     .iter()
-                    .map(|(name, field)| (name.to_owned(), Parameter::Namespaced(field.clone()))),
+                    .map(|(name, field)| (name.to_owned(), field.clone())),
             ),
             _marker: std::marker::PhantomData,
         }
@@ -352,8 +356,14 @@ impl From<BuiltinRepr> for Namespaced<Repr> {
                 parameters: HashMap::from_iter(IntoIter::new([
                     ("min".to_owned(), Parameter::SignedInt(storage_min)),
                     ("max".to_owned(), Parameter::SignedInt(storage_max)),
-                    ("suggested_min".to_owned(), Parameter::SignedInt(suggested_min)),
-                    ("suggested_max".to_owned(), Parameter::SignedInt(suggested_max)),
+                    (
+                        "suggested_min".to_owned(),
+                        Parameter::SignedInt(suggested_min),
+                    ),
+                    (
+                        "suggested_max".to_owned(),
+                        Parameter::SignedInt(suggested_max),
+                    ),
                 ])),
                 _marker: std::marker::PhantomData,
             },
@@ -367,8 +377,14 @@ impl From<BuiltinRepr> for Namespaced<Repr> {
                 parameters: HashMap::from_iter(IntoIter::new([
                     ("min".to_owned(), Parameter::UnsignedInt(storage_min)),
                     ("max".to_owned(), Parameter::UnsignedInt(storage_max)),
-                    ("suggested_min".to_owned(), Parameter::UnsignedInt(suggested_min)),
-                    ("suggested_max".to_owned(), Parameter::UnsignedInt(suggested_max)),
+                    (
+                        "suggested_min".to_owned(),
+                        Parameter::UnsignedInt(suggested_min),
+                    ),
+                    (
+                        "suggested_max".to_owned(),
+                        Parameter::UnsignedInt(suggested_max),
+                    ),
                 ])),
                 _marker: std::marker::PhantomData,
             },
@@ -645,8 +661,22 @@ where
                 parameters: self
                     .iter()
                     .enumerate()
-                    .map(|(i, v)| (format!("{}", i), Parameter::Namespaced(v.repr_default(ActionTarget::This))))
-                    .chain(std::iter::once(("len".to_owned(), Parameter::Namespaced(BuiltinRepr::UnsignedInteger { min: usize::MIN as u64, max: usize::MAX as u64 }.into()))))
+                    .map(|(i, v)| {
+                        (
+                            format!("{}", i),
+                            Parameter::Namespaced(v.repr_default(ActionTarget::This)),
+                        )
+                    })
+                    .chain(std::iter::once((
+                        "len".to_owned(),
+                        Parameter::Namespaced(
+                            BuiltinRepr::UnsignedInteger {
+                                min: usize::MIN as u64,
+                                max: usize::MAX as u64,
+                            }
+                            .into(),
+                        ),
+                    )))
                     .collect(),
                 _marker: std::marker::PhantomData,
             }
@@ -670,11 +700,20 @@ where
         } else {
             let trigger = value.try_into_namespaced().unwrap();
             if trigger.name[2] == "rm" {
-                let index = trigger.parameters["idx"].clone().try_into_unsigned_int().unwrap() as usize;
+                let index = trigger.parameters["idx"]
+                    .clone()
+                    .try_into_unsigned_int()
+                    .unwrap() as usize;
                 self.remove(index);
             } else if trigger.name[2] == "swp" {
-                let idx_a = trigger.parameters["a"].clone().try_into_unsigned_int().unwrap() as usize;
-                let idx_b = trigger.parameters["b"].clone().try_into_unsigned_int().unwrap() as usize;
+                let idx_a = trigger.parameters["a"]
+                    .clone()
+                    .try_into_unsigned_int()
+                    .unwrap() as usize;
+                let idx_b = trigger.parameters["b"]
+                    .clone()
+                    .try_into_unsigned_int()
+                    .unwrap() as usize;
                 self.swap(idx_a, idx_b);
             }
             true

@@ -741,8 +741,8 @@ fn recursive_ui<'a>(
 
 fn reader_thread(sender: Sender<Message>) {
     for line in BufReader::new(std::io::stdin()).lines() {
-        let line = line.unwrap();
-        let line = line.as_bytes();
+        let line_string = line.unwrap();
+        let line = line_string.as_bytes();
         let segments = line[1..].split(|c| *c == b';').collect::<Vec<_>>();
         match line[0] {
             b'\0' => {
@@ -802,7 +802,7 @@ fn reader_thread(sender: Sender<Message>) {
                     .unwrap()
             }
             _ => {
-                debug_assert!(false, "Unexpected input")
+                debug_assert!(false, "Unexpected input: {}", line_string);
             }
         }
     }

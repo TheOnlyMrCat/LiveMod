@@ -40,7 +40,7 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
             let gen = quote! {
                 #[automatically_derived]
                 impl ::livemod::LiveMod for #struct_name {
-                    fn repr_default(&self, target: ::livemod::ActionTarget) -> ::livemod::TrackedDataRepr {
+                    fn repr_default(&self, target: ::livemod::ActionTarget) -> ::livemod::Namespaced<::livemod::Repr> {
                         let #self_pattern = self;
                         if let Some((field, field_target)) = target.strip_one_field() {
                             match field {
@@ -48,29 +48,28 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
                                 _ => panic!("Unexpected value name!"),
                             }.repr_default(field_target)
                         } else {
-                            ::livemod::TrackedDataRepr::Struct {
-                                name: String::from(stringify!(#struct_name)),
-                                fields: vec![
+                            ::livemod::Namespaced::basic_structure_repr(
+                                stringify!(#struct_name),
+                                &[
                                     #(#representations),*
                                 ],
-                                triggers: vec![]
-                            }
+                            )
                         }
                     }
 
-                    fn trigger(&mut self, target: ::livemod::ActionTarget, trigger: ::livemod::Trigger) -> bool {
+                    fn accept(&mut self, target: ::livemod::ActionTarget, value: ::livemod::Parameter<::livemod::Value>) -> bool {
                         let #self_pattern = self;
                         if let Some((field, field_target)) = target.strip_one_field() {
                             match field {
                                 #(#get_named_values as &mut dyn ::livemod::LiveMod,)*
-                                _ => panic!("Unexpected value name!"),
-                            }.trigger(field_target, trigger)
+                                _ => panic!("Unexpected target!"),
+                            }.accept(field_target, value)
                         } else {
-                            panic!("Unexpected trigger operation!")
+                            panic!("Unexpected value!")
                         }
                     }
 
-                    fn get_self(&self, target: ::livemod::ActionTarget) -> ::livemod::TrackedDataValue {
+                    fn get_self(&self, target: ::livemod::ActionTarget) -> ::livemod::Parameter<::livemod::Value> {
                         let #self_pattern = self;
                         if let Some((field, field_target)) = target.strip_one_field() {
                             match field {
@@ -78,9 +77,9 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
                                 _ => panic!("Unexpected value name!"),
                             }.get_self(field_target)
                         } else {
-                            ::livemod::TrackedDataValue::Struct(vec![
+                            ::livemod::Parameter::Namespaced(::livemod::Namespaced::basic_structure_value(&[
                                 #(#get_selves),*
-                            ])
+                            ]))
                         }
                     }
                 }
@@ -88,6 +87,8 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
             gen.into()
         }
         syn::Data::Enum(en) => {
+            todo!();
+            /*
             let enum_name = ast.ident;
 
             let mut variant_names = vec![];
@@ -205,6 +206,7 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
                 }
             };
             gen.into()
+            */
         }
         syn::Data::Union(_) => {
             let gen = quote! {
@@ -341,11 +343,7 @@ fn derive_field(ident: Ident, default_name: String, field: Field) -> FieldDerive
             })
             .unwrap_or(&default_repr);
         let representation = quote! {
-            ::livemod::TrackedData {
-                name: #name.to_owned(),
-                data_type: ::livemod::LiveModRepr::repr(&#repr_struct, #ident) ,
-                triggers: vec![]
-            }
+            (#name.to_owned(), ::livemod::LiveModRepr::repr(&#repr_struct, #ident))
         };
 
         let get_named_value = quote! { #name => #ident };
