@@ -1,9 +1,10 @@
 //! # livemod - Runtime modification of program parameters
 
 use std::array::IntoIter;
-use std::collections::HashMap;
 use std::iter::FromIterator;
 use std::ops::RangeInclusive;
+
+use hashlink::LinkedHashMap;
 
 #[cfg(feature = "livemod-derive")]
 pub use livemod_derive::LiveMod;
@@ -107,7 +108,7 @@ impl<T> Parameter<T> {
             c if c.is_ascii_digit() => Ok(Parameter::UnsignedInt(s.parse().unwrap())),
             b't' => Ok(Parameter::Bool(true)),
             b'f' => Ok(Parameter::Bool(false)),
-            b'\"' => Ok(Parameter::String(s[1..s.len() - 2].to_owned())),
+            b'\"' => Ok(Parameter::String(s[1..s.len() - 1].to_owned())),
             _ => Ok(Parameter::Namespaced(Namespaced::deserialize(&s)?)),
         }
     }
@@ -212,12 +213,12 @@ impl<T> Parameter<T> {
 #[derive(Clone, Debug)]
 pub struct Namespaced<T> {
     pub name: Vec<String>,
-    pub parameters: HashMap<String, Parameter<T>>,
+    pub parameters: LinkedHashMap<String, Parameter<T>>,
     _marker: std::marker::PhantomData<T>,
 }
 
 impl<T> Namespaced<T> {
-    pub fn new(name: Vec<String>, parameters: HashMap<String, Parameter<T>>) -> Self {
+    pub fn new(name: Vec<String>, parameters: LinkedHashMap<String, Parameter<T>>) -> Self {
         Namespaced {
             name,
             parameters,
@@ -242,7 +243,7 @@ impl<T> Namespaced<T> {
         let (name, params) = s.split_once('{').unwrap(); // Rust 1.52... Should I support earlier?
         let name = name.split(':').map(|s| s.trim().to_owned()).collect();
 
-        let mut parameters = HashMap::new();
+        let mut parameters = LinkedHashMap::new();
         let mut nested_level = 0;
         for s in params[..params.len() - 1].split(|c| {
             match c {
@@ -274,13 +275,13 @@ impl Namespaced<Repr> {
     ) -> Namespaced<Repr> {
         Namespaced {
             name: vec!["livemod".to_owned(), "struct".to_owned()],
-            parameters: HashMap::from_iter(IntoIter::new([
+            parameters: LinkedHashMap::from_iter(IntoIter::new([
                 ("name".to_owned(), Parameter::String(name.to_owned())),
                 (
                     "fields".to_owned(),
                     Parameter::Namespaced(Namespaced {
                         name: vec!["livemod".to_owned(), "fields".to_owned()],
-                        parameters: HashMap::from_iter(fields.iter().map(|(name, field)| {
+                        parameters: LinkedHashMap::from_iter(fields.iter().map(|(name, field)| {
                             (name.to_owned(), Parameter::Namespaced(field.clone()))
                         })),
                         _marker: std::marker::PhantomData,
@@ -296,7 +297,7 @@ impl Namespaced<Value> {
     pub fn basic_structure_value(fields: &[(String, Parameter<Value>)]) -> Namespaced<Value> {
         Namespaced {
             name: vec!["livemod".to_owned(), "struct".to_owned()],
-            parameters: HashMap::from_iter(
+            parameters: LinkedHashMap::from_iter(
                 fields
                     .iter()
                     .map(|(name, field)| (name.to_owned(), field.clone())),
@@ -311,12 +312,12 @@ impl From<BuiltinRepr> for Namespaced<Repr> {
         match b {
             BuiltinRepr::Bool => Namespaced {
                 name: vec!["livemod".to_owned(), "bool".to_owned()],
-                parameters: HashMap::new(),
+                parameters: LinkedHashMap::new(),
                 _marker: std::marker::PhantomData,
             },
             BuiltinRepr::String { multiline } => Namespaced {
                 name: vec!["livemod".to_owned(), "string".to_owned()],
-                parameters: HashMap::from_iter(IntoIter::new([(
+                parameters: LinkedHashMap::from_iter(IntoIter::new([(
                     "multiline".to_owned(),
                     Parameter::Bool(multiline),
                 )])),
@@ -324,7 +325,7 @@ impl From<BuiltinRepr> for Namespaced<Repr> {
             },
             BuiltinRepr::SignedInteger { min, max } => Namespaced {
                 name: vec!["livemod".to_owned(), "sint".to_owned()],
-                parameters: HashMap::from_iter(IntoIter::new([
+                parameters: LinkedHashMap::from_iter(IntoIter::new([
                     ("min".to_owned(), Parameter::SignedInt(min)),
                     ("max".to_owned(), Parameter::SignedInt(max)),
                 ])),
@@ -332,7 +333,7 @@ impl From<BuiltinRepr> for Namespaced<Repr> {
             },
             BuiltinRepr::UnsignedInteger { min, max } => Namespaced {
                 name: vec!["livemod".to_owned(), "uint".to_owned()],
-                parameters: HashMap::from_iter(IntoIter::new([
+                parameters: LinkedHashMap::from_iter(IntoIter::new([
                     ("min".to_owned(), Parameter::UnsignedInt(min)),
                     ("max".to_owned(), Parameter::UnsignedInt(max)),
                 ])),
@@ -340,7 +341,7 @@ impl From<BuiltinRepr> for Namespaced<Repr> {
             },
             BuiltinRepr::Float { min, max } => Namespaced {
                 name: vec!["livemod".to_owned(), "float".to_owned()],
-                parameters: HashMap::from_iter(IntoIter::new([
+                parameters: LinkedHashMap::from_iter(IntoIter::new([
                     ("min".to_owned(), Parameter::Float(min)),
                     ("max".to_owned(), Parameter::Float(max)),
                 ])),
@@ -353,7 +354,7 @@ impl From<BuiltinRepr> for Namespaced<Repr> {
                 suggested_max,
             } => Namespaced {
                 name: vec!["livemod".to_owned(), "sint".to_owned()],
-                parameters: HashMap::from_iter(IntoIter::new([
+                parameters: LinkedHashMap::from_iter(IntoIter::new([
                     ("min".to_owned(), Parameter::SignedInt(storage_min)),
                     ("max".to_owned(), Parameter::SignedInt(storage_max)),
                     (
@@ -374,7 +375,7 @@ impl From<BuiltinRepr> for Namespaced<Repr> {
                 suggested_max,
             } => Namespaced {
                 name: vec!["livemod".to_owned(), "uint".to_owned()],
-                parameters: HashMap::from_iter(IntoIter::new([
+                parameters: LinkedHashMap::from_iter(IntoIter::new([
                     ("min".to_owned(), Parameter::UnsignedInt(storage_min)),
                     ("max".to_owned(), Parameter::UnsignedInt(storage_max)),
                     (
@@ -395,7 +396,7 @@ impl From<BuiltinRepr> for Namespaced<Repr> {
                 suggested_max,
             } => Namespaced {
                 name: vec!["livemod".to_owned(), "float".to_owned()],
-                parameters: HashMap::from_iter(IntoIter::new([
+                parameters: LinkedHashMap::from_iter(IntoIter::new([
                     ("min".to_owned(), Parameter::Float(storage_min)),
                     ("max".to_owned(), Parameter::Float(storage_max)),
                     ("suggested_min".to_owned(), Parameter::Float(suggested_min)),
@@ -753,14 +754,14 @@ impl<A, F: FnMut(&mut A)> LiveMod for TriggerFn<A, F> {
         debug_assert!(target.is_this());
         Namespaced {
             name: vec!["livemod".to_owned(), "trigger".to_owned()],
-            parameters: HashMap::new(),
+            parameters: LinkedHashMap::new(),
             _marker: std::marker::PhantomData,
         }
     }
 
     fn accept(&mut self, target: ActionTarget, trigger: Parameter<Value>) -> bool {
         debug_assert!(target.is_this());
-        debug_assert!(trigger.try_into_namespaced().unwrap().name[2] == "trigger");
+        debug_assert!(trigger.try_into_namespaced().unwrap().name[1] == "trigger");
         (self.func)(&mut self.arg);
         false
     }
@@ -769,7 +770,7 @@ impl<A, F: FnMut(&mut A)> LiveMod for TriggerFn<A, F> {
         debug_assert!(target.is_this());
         Parameter::Namespaced(Namespaced {
             name: vec!["livemod".to_owned(), "trigger".to_owned()],
-            parameters: HashMap::new(),
+            parameters: LinkedHashMap::new(),
             _marker: std::marker::PhantomData,
         })
     }

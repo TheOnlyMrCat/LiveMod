@@ -290,23 +290,29 @@ fn input_thread(
         match message {
             Message::NewVariable(name, handle) => {
                 let var = unsafe { handle.var.as_ref() }.lock();
+                let repr = var.repr_default(ActionTarget::This).serialize();
+                let value = var.get_self(ActionTarget::This).serialize();
                 writeln!(
                     input,
-                    "n{};{};{}",
+                    "n{};{}-{};{}-{}",
                     &name,
-                    var.repr_default(ActionTarget::This).serialize(),
-                    var.get_self(ActionTarget::This).serialize(),
+                    repr.as_bytes().len(),
+                    repr,
+                    value.as_bytes().len(),
+                    value,
                 )
                 .unwrap();
                 variables.write().insert(name, handle);
             }
             Message::UpdatedVariable(name, handle) => {
                 let var = unsafe { handle.var.as_ref() }.lock();
+                let value = var.get_self(ActionTarget::This).serialize();
                 writeln!(
                     input,
-                    "s{};{}",
+                    "s{};{}-{}",
                     &name,
-                    var.get_self(ActionTarget::This).serialize(),
+                    value.as_bytes().len(),
+                    value,
                 )
                 .unwrap();
             }
@@ -318,17 +324,23 @@ fn input_thread(
 
                 let path_ref = path.iter().map(|s| s.as_str()).collect::<Vec<_>>();
 
+                let repr = var_handle
+                    .repr_default(ActionTarget::from_name_and_fields(&path_ref))
+                    .serialize();
+                
+                let value = var_handle
+                    .get_self(ActionTarget::from_name_and_fields(&path_ref))
+                    .serialize();
+
                 writeln!(
                     input,
-                    "u{};{};{}",
+                    "u{};{}-{};{}-{}",
                     path.iter()
                         .fold(String::new(), |acc, v| format!("{}:{}", acc, v)),
-                    var_handle
-                        .repr_default(ActionTarget::from_name_and_fields(&path_ref))
-                        .serialize(),
-                    var_handle
-                        .get_self(ActionTarget::from_name_and_fields(&path_ref))
-                        .serialize(),
+                    repr.as_bytes().len(),
+                    repr,
+                    value.as_bytes().len(),
+                    value,
                 )
                 .unwrap();
             }
@@ -367,7 +379,7 @@ fn output_thread(
                     .collect::<Result<Vec<&str>, _>>()
                     .expect("Invalid text encoding received from viewer");
 
-                let namespaced_name = segments[0].split(':').collect::<Vec<_>>();
+                let namespaced_name = segments[0].split('.').collect::<Vec<_>>();
 
                 // Get the 'base' variable from our HashMap
                 let base = namespaced_name.first().unwrap();

@@ -15,5 +15,6 @@ disabled = []
 
 [dependencies]
 parking_lot = "0.11"
+hashlink = "0.7"
 
 livemod-derive = { path = "../livemod-derive", version = "0.4", optional = true }

@@ -1,13 +1,14 @@
 use std::collections::{HashMap, HashSet};
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::sync::mpsc::{self, Sender};
 
 use glium::glutin;
+use hashlink::LinkedHashMap;
 use livemod::{Namespaced, Parameter, Repr, Value};
 
 #[derive(Default)]
 struct State {
-    tracked_vars: HashMap<String, Namespaced<Repr>>,
+    tracked_vars: LinkedHashMap<String, Namespaced<Repr>>,
     tracked_data: HashMap<String, TrackedParameter>,
     modified_data: Vec<String>,
 }
@@ -33,7 +34,13 @@ impl TrackedParameter {
             TrackedParameter::Bool(true) => "t".to_owned(),
             TrackedParameter::Bool(false) => "f".to_owned(),
             TrackedParameter::String(s) => format!("\"{}\"", s),
-            TrackedParameter::Namespaced { name, params } => todo!(),
+            TrackedParameter::Namespaced { name, params } => {
+                if params.is_empty() {
+                    format!("{}{{}}", name.join(":"))
+                } else {
+                    todo!()
+                }
+            },
         }
     }
 
@@ -152,11 +159,7 @@ fn main() {
     event_loop.run(move |event, _, control_flow| match event {
         glutin::event::Event::MainEventsCleared => {
             while let Ok(msg) = recv.try_recv() {
-                fn recursive_insert(
-                    name: String,
-                    param: Parameter<Value>,
-                    state: &mut State,
-                ) {
+                fn recursive_insert(name: String, param: Parameter<Value>, state: &mut State) {
                     let parameter = match param {
                         Parameter::SignedInt(value) => TrackedParameter::SignedInt(value),
                         Parameter::UnsignedInt(value) => TrackedParameter::UnsignedInt(value),
@@ -180,7 +183,7 @@ fn main() {
 
                 match msg {
                     Message::NewData(name, data, initial_value) => {
-                        recursive_insert(format!("{}", &name), initial_value, &mut state);
+                        recursive_insert(format!(".{}", &name), initial_value, &mut state);
                         state.tracked_vars.insert(name, data);
                     }
                     Message::UpdateRepr(path, data, value) => {
@@ -225,16 +228,27 @@ fn main() {
                 egui::Grid::new("base_grid")
                     .striped(true)
                     .spacing([40.0, 4.0])
-                    .show(ui, |ui| {});
+                    .show(ui, |ui| {
+                        draw_repr(
+                            ui,
+                            &Namespaced::new(
+                                vec!["livemod".to_owned(), "fields".to_owned()],
+                                //TODO: Optimize this
+                                state
+                                    .tracked_vars
+                                    .iter()
+                                    .map(|(k, v)| (k.to_owned(), Parameter::Namespaced(v.clone())))
+                                    .collect(),
+                            ),
+                            "".to_owned(),
+                            &mut state,
+                        )
+                    });
             });
 
             for name in state.modified_data.drain(..) {
                 let value = state.tracked_data[&name].serialize();
-                println!(
-                    "s{};{}",
-                    name,
-                    value,
-                );
+                println!("s{};{}", &name[1..], value);
             }
 
             let (needs_repaint, shapes) = egui.end_frame(&display);
@@ -275,14 +289,6 @@ fn main() {
     });
 }
 
-enum Message {
-    NewData(String, Namespaced<Repr>, Parameter<Value>),
-    UpdateRepr(String, Namespaced<Repr>, Parameter<Value>),
-    UpdateData(String, Parameter<Value>),
-    RemoveData(String),
-    Quit,
-}
-
 /// Dispatch and draw the given `repr` to the given `ui`.
 ///
 /// # Parameters
@@ -304,7 +310,50 @@ fn draw_repr(ui: &mut egui::Ui, repr: &Namespaced<Repr>, namespace: String, stat
             }
             "struct" => {
                 ui.collapsing(repr.parameters["name"].as_string().unwrap(), |ui| {
-                    draw_repr(ui, repr.parameters["fields"].as_namespaced().unwrap(), namespace, state);
+                    egui::Grid::new(&namespace)
+                        .striped(true)
+                        .spacing([40.0, 4.0])
+                        .show(ui, |ui| {
+                            draw_repr(
+                                ui,
+                                repr.parameters["fields"].as_namespaced().unwrap(),
+                                namespace,
+                                state,
+                            );
+                        });
+                });
+            }
+            "vec" => {
+                ui.collapsing("Vec", |ui| {
+                    egui::Grid::new(&namespace)
+                        .striped(true)
+                        .spacing([40.0, 4.0])
+                        .show(ui, |ui| {
+                            ui.label("Length");
+                            let len_field = format!("{}.len", namespace);
+                            let mut len = state.tracked_data.entry(len_field.clone()).or_insert(
+                                TrackedParameter::UnsignedInt(
+                                    repr.parameters["len"].as_unsigned_int().copied().unwrap(),
+                                ),
+                            );
+                            ui.add(egui::DragValue::new(len.as_unsigned_int_mut().unwrap()).speed(0.1))
+                                .changed()
+                                .then(|| {
+                                    state.modified_data.push(len_field);
+                                });
+                            for (i, field) in &repr.parameters {
+                                let i = match i.parse::<usize>() {
+                                    Ok(i) => i,
+                                    Err(_) => continue,
+                                };
+                                let field_namespace = format!("{}.{}", namespace, i);
+                                let field = field.as_namespaced().unwrap();
+                                ui.label(format!("{}", i));
+                                draw_repr(ui, field, field_namespace, state);
+                                //TODO: Add remove button, insert button, etc.
+                                ui.end_row();
+                            }
+                        });
                 });
             }
             "bool" => {
@@ -315,10 +364,21 @@ fn draw_repr(ui: &mut egui::Ui, repr: &Namespaced<Repr>, namespace: String, stat
                         .or_insert(TrackedParameter::Bool(false))
                         .as_bool_mut()
                         .unwrap(),
-                    ""
+                    "",
                 )
                 .changed()
                 .then(|| state.modified_data.push(namespace));
+            }
+            "trigger" => {
+                ui.button(
+                    repr.parameters
+                        .get("name")
+                        .and_then(|param| param.as_string().map(|s| s.as_str()))
+                        .unwrap_or("Call"),
+                ).clicked().then(|| {
+                    state.tracked_data.insert(namespace.clone(), TrackedParameter::Namespaced { name: vec!["livemod".to_owned(), "trigger".to_owned()], params: HashSet::new() });
+                    state.modified_data.push(namespace);
+                });
             }
             "string" => {
                 if repr
@@ -351,8 +411,14 @@ fn draw_repr(ui: &mut egui::Ui, repr: &Namespaced<Repr>, namespace: String, stat
             "sint" => {
                 let min = repr.parameters["min"].as_signed_int().copied().unwrap();
                 let max = repr.parameters["max"].as_signed_int().copied().unwrap();
-                let suggested_min = repr.parameters.get("suggested_min").and_then(|p| p.as_signed_int().copied());
-                let suggested_max = repr.parameters.get("suggested_max").and_then(|p| p.as_signed_int().copied());
+                let suggested_min = repr
+                    .parameters
+                    .get("suggested_min")
+                    .and_then(|p| p.as_signed_int().copied());
+                let suggested_max = repr
+                    .parameters
+                    .get("suggested_max")
+                    .and_then(|p| p.as_signed_int().copied());
                 if let (Some(suggested_min), Some(suggested_max)) = (suggested_min, suggested_max) {
                     ui.add(
                         egui::Slider::from_get_set(
@@ -384,8 +450,14 @@ fn draw_repr(ui: &mut egui::Ui, repr: &Namespaced<Repr>, namespace: String, stat
             "uint" => {
                 let min = repr.parameters["min"].as_unsigned_int().copied().unwrap();
                 let max = repr.parameters["max"].as_unsigned_int().copied().unwrap();
-                let suggested_min = repr.parameters.get("suggested_min").and_then(|p| p.as_unsigned_int().copied());
-                let suggested_max = repr.parameters.get("suggested_max").and_then(|p| p.as_unsigned_int().copied());
+                let suggested_min = repr
+                    .parameters
+                    .get("suggested_min")
+                    .and_then(|p| p.as_unsigned_int().copied());
+                let suggested_max = repr
+                    .parameters
+                    .get("suggested_max")
+                    .and_then(|p| p.as_unsigned_int().copied());
                 if let (Some(suggested_min), Some(suggested_max)) = (suggested_min, suggested_max) {
                     ui.add(
                         egui::Slider::from_get_set(
@@ -416,8 +488,14 @@ fn draw_repr(ui: &mut egui::Ui, repr: &Namespaced<Repr>, namespace: String, stat
             "float" => {
                 let min = repr.parameters["min"].as_float().copied().unwrap();
                 let max = repr.parameters["max"].as_float().copied().unwrap();
-                let suggested_min = repr.parameters.get("suggested_min").and_then(|p| p.as_float().copied());
-                let suggested_max = repr.parameters.get("suggested_max").and_then(|p| p.as_float().copied());
+                let suggested_min = repr
+                    .parameters
+                    .get("suggested_min")
+                    .and_then(|p| p.as_float().copied());
+                let suggested_max = repr
+                    .parameters
+                    .get("suggested_max")
+                    .and_then(|p| p.as_float().copied());
                 if let (Some(suggested_min), Some(suggested_max)) = (suggested_min, suggested_max) {
                     ui.add(
                         egui::Slider::from_get_set(
@@ -444,7 +522,133 @@ fn draw_repr(ui: &mut egui::Ui, repr: &Namespaced<Repr>, namespace: String, stat
                     )
                 }.changed().then(|| state.modified_data.push(namespace));
             }
-            _ => panic!(),
+            name => panic!("Unknown livemod builtin: {}", name),
+        }
+    }
+}
+
+enum Message {
+    NewData(String, Namespaced<Repr>, Parameter<Value>),
+    UpdateRepr(String, Namespaced<Repr>, Parameter<Value>),
+    UpdateData(String, Parameter<Value>),
+    RemoveData(String),
+    Quit,
+}
+
+fn reader_thread(sender: Sender<Message>) {
+    let stream = std::io::stdin();
+    let mut reader = BufReader::new(stream.lock());
+
+    loop {
+        let message_type = {
+            let mut message_type = [0u8];
+            reader.read_exact(&mut message_type).unwrap();
+            message_type[0]
+        };
+
+        match message_type {
+            b'\0' => {
+                sender.send(Message::Quit);
+                break; // And exit the thread
+            }
+            b'n' => {
+                let name = {
+                    let mut name = Vec::new();
+                    reader.read_until(b';', &mut name).unwrap();
+                    name.pop(); // Pop delimiter
+                    String::from_utf8(name).unwrap()
+                };
+
+                let len_repr = {
+                    let mut len = Vec::new();
+                    reader.read_until(b'-', &mut len).unwrap();
+                    len.pop(); // Pop delimiter
+                    String::from_utf8(len).unwrap().parse::<usize>().unwrap()
+                };
+                let repr = {
+                    let mut repr = vec![0u8; len_repr];
+                    reader.read_exact(&mut repr).unwrap();
+                    Namespaced::deserialize(std::str::from_utf8(&repr).unwrap()).unwrap()
+                };
+                reader.consume(1); // Consume ';' delimiter
+
+                let len_value = {
+                    let mut len = Vec::new();
+                    reader.read_until(b'-', &mut len).unwrap();
+                    len.pop(); // Pop delimiter
+                    String::from_utf8(len).unwrap().parse::<usize>().unwrap()
+                };
+                let value = {
+                    let mut value = vec![0u8; len_value];
+                    reader.read_exact(&mut value).unwrap();
+                    Parameter::deserialize(std::str::from_utf8(&value).unwrap()).unwrap()
+                };
+                sender.send(Message::NewData(name, repr, value));
+            }
+            b's' => {
+                let name = {
+                    let mut name = Vec::new();
+                    reader.read_until(b';', &mut name).unwrap();
+                    name.pop(); // Pop delimiter
+                    String::from_utf8(name).unwrap()
+                };
+
+                let len_value = {
+                    let mut len = Vec::new();
+                    reader.read_until(b'-', &mut len).unwrap();
+                    len.pop(); // Pop delimiter
+                    String::from_utf8(len).unwrap().parse::<usize>().unwrap()
+                };
+                let value = {
+                    let mut value = vec![0u8; len_value];
+                    reader.read_exact(&mut value).unwrap();
+                    Parameter::deserialize(std::str::from_utf8(&value).unwrap()).unwrap()
+                };
+                sender.send(Message::UpdateData(name, value));
+            }
+            b'u' => {
+                let name = {
+                    let mut name = Vec::new();
+                    reader.read_until(b';', &mut name).unwrap();
+                    name.pop(); // Pop delimiter
+                    String::from_utf8(name).unwrap()
+                };
+
+                let len_repr = {
+                    let mut len = Vec::new();
+                    reader.read_until(b'-', &mut len).unwrap();
+                    len.pop(); // Pop delimiter
+                    String::from_utf8(len).unwrap().parse::<usize>().unwrap()
+                };
+                let repr = {
+                    let mut repr = vec![0u8; len_repr];
+                    reader.read_exact(&mut repr).unwrap();
+                    Namespaced::deserialize(std::str::from_utf8(&repr).unwrap()).unwrap()
+                };
+                reader.consume(1); // Consume ';' delimiter
+
+                let len_value = {
+                    let mut len = Vec::new();
+                    reader.read_until(b'-', &mut len).unwrap();
+                    len.pop(); // Pop delimiter
+                    String::from_utf8(len).unwrap().parse::<usize>().unwrap()
+                };
+                let value = {
+                    let mut value = vec![0u8; len_value];
+                    reader.read_exact(&mut value).unwrap();
+                    Parameter::deserialize(std::str::from_utf8(&value).unwrap()).unwrap()
+                };
+                sender.send(Message::UpdateRepr(name, repr, value));
+            }
+            b'r' => {
+                let name = {
+                    let mut name = String::new();
+                    reader.read_line(&mut name).unwrap();
+                    name
+                };
+                sender.send(Message::RemoveData(name));
+            }
+            _ => {}
         }
     }
 }
@@ -737,7 +941,6 @@ fn recursive_ui<'a>(
         }
     }
 }
-*/
 
 fn reader_thread(sender: Sender<Message>) {
     for line in BufReader::new(std::io::stdin()).lines() {
@@ -807,3 +1010,4 @@ fn reader_thread(sender: Sender<Message>) {
         }
     }
 }
+*/
