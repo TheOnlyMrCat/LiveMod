@@ -8,3 +8,9 @@ PATH="target/debug:$PATH"
 cargo build --package livemod-gui
 cargo run --package livemod-test
 #/
+
+#tee
+PATH="target/debug:$PATH"
+cargo build --package livemod-gui --features io_tee
+cargo run --package livemod-test
+#/

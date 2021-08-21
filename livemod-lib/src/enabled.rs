@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
@@ -93,7 +93,7 @@ impl LiveModHandle {
             variables: self.variables.clone(),
         };
         let var_handle = ModVarHandle {
-            var: NonNull::from(&*mod_var.value)
+            var: NonNull::from(&*mod_var.value),
         };
         self.sender
             .send(Message::NewVariable(name.to_owned(), var_handle))
@@ -108,7 +108,11 @@ impl LiveModHandle {
     ///
     /// # Safety
     /// You must ensure the returned variable is dropped before any of the variables it references.
-    pub unsafe fn create_variable_unchecked<'a, T: LiveMod + 'a>(&self, name: &str, var: T) -> ModVar<T> {
+    pub unsafe fn create_variable_unchecked<'a, T: LiveMod + 'a>(
+        &self,
+        name: &str,
+        var: T,
+    ) -> ModVar<T> {
         let mod_var = ModVar {
             name: name.to_owned(),
             value: Box::new(Mutex::new(var)),
@@ -117,9 +121,9 @@ impl LiveModHandle {
         };
         let var_handle = ModVarHandle {
             var: std::mem::transmute::<
-                    NonNull<Mutex<dyn LiveMod + 'a>>,
-                    NonNull<Mutex<dyn LiveMod + 'static>>,
-                >(NonNull::from(&*mod_var.value))
+                NonNull<Mutex<dyn LiveMod + 'a>>,
+                NonNull<Mutex<dyn LiveMod + 'static>>,
+            >(NonNull::from(&*mod_var.value)),
         };
         self.sender
             .send(Message::NewVariable(name.to_owned(), var_handle))
@@ -267,7 +271,7 @@ enum Message {
     NewVariable(String, ModVarHandle),
     UpdatedVariable(String, ModVarHandle),
     RemoveVariable(String),
-    UpdatedRepr(Vec<String>),
+    UpdatedRepr(String),
     Quit,
 }
 
@@ -307,36 +311,21 @@ fn input_thread(
             Message::UpdatedVariable(name, handle) => {
                 let var = unsafe { handle.var.as_ref() }.lock();
                 let value = var.get_self(ActionTarget::This).serialize();
-                writeln!(
-                    input,
-                    "s{};{}-{}",
-                    &name,
-                    value.as_bytes().len(),
-                    value,
-                )
-                .unwrap();
+                writeln!(input, "s{};{}-{}", &name, value.as_bytes().len(), value,).unwrap();
             }
-            Message::UpdatedRepr(path) => {
+            Message::UpdatedRepr(name) => {
                 // Get the 'base' variable from our HashMap
-                let base = path.first().unwrap();
                 let var_handle =
-                    unsafe { &mut *variables.read().get(base).unwrap().var.as_ref().lock() };
+                    unsafe { &mut *variables.read().get(&name).unwrap().var.as_ref().lock() };
 
-                let path_ref = path.iter().map(|s| s.as_str()).collect::<Vec<_>>();
+                let repr = var_handle.repr_default(ActionTarget::This).serialize();
 
-                let repr = var_handle
-                    .repr_default(ActionTarget::from_name_and_fields(&path_ref))
-                    .serialize();
-                
-                let value = var_handle
-                    .get_self(ActionTarget::from_name_and_fields(&path_ref))
-                    .serialize();
+                let value = var_handle.get_self(ActionTarget::This).serialize();
 
                 writeln!(
                     input,
                     "u{};{}-{};{}-{}",
-                    path.iter()
-                        .fold(String::new(), |acc, v| format!("{}:{}", acc, v)),
+                    name,
                     repr.as_bytes().len(),
                     repr,
                     value.as_bytes().len(),
@@ -362,9 +351,16 @@ fn output_thread(
     variables: Arc<RwLock<HashMap<String, ModVarHandle>>>,
     barrier: Arc<Barrier>,
 ) {
-    for line in BufReader::new(output).lines() {
-        let line = line.as_ref().unwrap().as_bytes();
-        match line[0] {
+    let mut reader = BufReader::new(output);
+
+    loop {
+        let message_type = {
+            let mut message_type = [0u8];
+            reader.read_exact(&mut message_type).unwrap();
+            message_type[0]
+        };
+
+        match message_type {
             b'\0' => {
                 // The LiveModHandle which spawned this thread has
                 // been destroyed, the child informed of it, and the
@@ -373,13 +369,27 @@ fn output_thread(
             }
             b's' => {
                 // Data is to be changed
-                let segments = line[1..]
-                    .split(|&b| b == b';')
-                    .map(std::str::from_utf8)
-                    .collect::<Result<Vec<&str>, _>>()
-                    .expect("Invalid text encoding received from viewer");
+                let name = {
+                    let mut name = Vec::new();
+                    reader.read_until(b';', &mut name).unwrap();
+                    name.pop(); // Remove trailing ';'
+                    String::from_utf8(name).unwrap()
+                };
 
-                let namespaced_name = segments[0].split('.').collect::<Vec<_>>();
+                let namespaced_name = name.split('.').collect::<Vec<_>>();
+
+                let value = {
+                    let len = {
+                        let mut len = Vec::new();
+                        reader.read_until(b'-', &mut len).unwrap();
+                        len.pop(); // Pop delimiter
+                        String::from_utf8(len).unwrap().parse::<usize>().unwrap()
+                    };
+
+                    let mut value = vec![0u8; len];
+                    reader.read_exact(&mut value).unwrap();
+                    Parameter::deserialize(std::str::from_utf8(&value).unwrap()).unwrap()
+                };
 
                 // Get the 'base' variable from our HashMap
                 let base = namespaced_name.first().unwrap();
@@ -393,28 +403,23 @@ fn output_thread(
                     }
                     .var
                     // SAFETY: Pointers are valid as long as they are in the map
+                    //TODO: Convert to Arcs because there really is no need for raw pointers
                     .as_ref()
                     .lock()
                 };
 
                 // Set the variable
-                if referenced_var.accept(
-                    ActionTarget::from_name_and_fields(&namespaced_name),
-                    Parameter::deserialize(
-                        segments.last().unwrap()
-                    ).unwrap(),
-                ) {
+                if referenced_var
+                    .accept(ActionTarget::from_name_and_fields(&namespaced_name), value)
+                {
                     sender
-                        .send(Message::UpdatedRepr(
-                            namespaced_name.iter().map(|&s| s.to_owned()).collect(),
-                        ))
+                        .send(Message::UpdatedRepr(namespaced_name[0].to_owned()))
                         .unwrap();
                 }
             }
-            _ => {
-                debug_assert!(false, "Unexpected output from child process")
-            }
+            _ => {}
         }
     }
+
     barrier.wait();
 }

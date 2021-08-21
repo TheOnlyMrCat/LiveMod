@@ -40,7 +40,7 @@ impl TrackedParameter {
                 } else {
                     todo!()
                 }
-            },
+            }
         }
     }
 
@@ -183,32 +183,12 @@ fn main() {
 
                 match msg {
                     Message::NewData(name, data, initial_value) => {
-                        recursive_insert(format!(".{}", &name), initial_value, &mut state);
+                        recursive_insert(format!(".{}", name), initial_value, &mut state);
                         state.tracked_vars.insert(name, data);
                     }
-                    Message::UpdateRepr(path, data, value) => {
-                        todo!();
-                        /*
-                        recursive_insert(path.clone(), value, &mut tracked_params);
-
-                        let namespaced_name = path.split('.').collect::<Vec<_>>();
-
-                        // Get base variable
-                        let mut value = tracked_variables[namespaced_name[0]];
-
-                        // Iterate into fields
-                        for name in &namespaced_name[1..] {
-                            value = match value.data_type {
-                                TrackedDataRepr::Struct { ref mut fields, .. }
-                                | TrackedDataRepr::Enum { ref mut fields, .. } => {
-                                    fields.iter_mut().find(|var| var.name == *name).unwrap()
-                                }
-                                _ => panic!(),
-                            };
-                        }
-
-                        value.data_type = data;
-                        */
+                    Message::UpdateRepr(name, data, value) => {
+                        recursive_insert(format!(".{}", name), value, &mut state);
+                        *state.tracked_vars.get_mut(&name).unwrap() = data;
                     }
                     Message::UpdateData(name, value) => {
                         recursive_insert(name, value, &mut state);
@@ -248,7 +228,7 @@ fn main() {
 
             for name in state.modified_data.drain(..) {
                 let value = state.tracked_data[&name].serialize();
-                println!("s{};{}", &name[1..], value);
+                println!("s{};{}-{}", &name[1..], value.as_bytes().len(), value);
             }
 
             let (needs_repaint, shapes) = egui.end_frame(&display);
@@ -336,11 +316,14 @@ fn draw_repr(ui: &mut egui::Ui, repr: &Namespaced<Repr>, namespace: String, stat
                                     repr.parameters["len"].as_unsigned_int().copied().unwrap(),
                                 ),
                             );
-                            ui.add(egui::DragValue::new(len.as_unsigned_int_mut().unwrap()).speed(0.1))
-                                .changed()
-                                .then(|| {
-                                    state.modified_data.push(len_field);
-                                });
+                            ui.add(
+                                egui::DragValue::new(len.as_unsigned_int_mut().unwrap()).speed(0.1),
+                            )
+                            .changed()
+                            .then(|| {
+                                state.modified_data.push(len_field);
+                            });
+                            ui.end_row();
                             for (i, field) in &repr.parameters {
                                 let i = match i.parse::<usize>() {
                                     Ok(i) => i,
@@ -375,8 +358,16 @@ fn draw_repr(ui: &mut egui::Ui, repr: &Namespaced<Repr>, namespace: String, stat
                         .get("name")
                         .and_then(|param| param.as_string().map(|s| s.as_str()))
                         .unwrap_or("Call"),
-                ).clicked().then(|| {
-                    state.tracked_data.insert(namespace.clone(), TrackedParameter::Namespaced { name: vec!["livemod".to_owned(), "trigger".to_owned()], params: HashSet::new() });
+                )
+                .clicked()
+                .then(|| {
+                    state.tracked_data.insert(
+                        namespace.clone(),
+                        TrackedParameter::Namespaced {
+                            name: vec!["livemod".to_owned(), "trigger".to_owned()],
+                            params: HashSet::new(),
+                        },
+                    );
                     state.modified_data.push(namespace);
                 });
             }
@@ -536,8 +527,14 @@ enum Message {
 }
 
 fn reader_thread(sender: Sender<Message>) {
+    #[cfg(feature = "io_tee")]
+    use io_tee::ReadExt;
+
     let stream = std::io::stdin();
+    #[cfg(not(feature = "io_tee"))]
     let mut reader = BufReader::new(stream.lock());
+    #[cfg(feature = "io_tee")]
+    let mut reader = BufReader::new(stream.lock()).tee_dbg();
 
     loop {
         let message_type = {
@@ -548,7 +545,7 @@ fn reader_thread(sender: Sender<Message>) {
 
         match message_type {
             b'\0' => {
-                sender.send(Message::Quit);
+                sender.send(Message::Quit).unwrap();
                 break; // And exit the thread
             }
             b'n' => {
@@ -570,6 +567,7 @@ fn reader_thread(sender: Sender<Message>) {
                     reader.read_exact(&mut repr).unwrap();
                     Namespaced::deserialize(std::str::from_utf8(&repr).unwrap()).unwrap()
                 };
+                reader.fill_buf().unwrap();
                 reader.consume(1); // Consume ';' delimiter
 
                 let len_value = {
@@ -583,7 +581,7 @@ fn reader_thread(sender: Sender<Message>) {
                     reader.read_exact(&mut value).unwrap();
                     Parameter::deserialize(std::str::from_utf8(&value).unwrap()).unwrap()
                 };
-                sender.send(Message::NewData(name, repr, value));
+                sender.send(Message::NewData(name, repr, value)).unwrap();
             }
             b's' => {
                 let name = {
@@ -604,7 +602,7 @@ fn reader_thread(sender: Sender<Message>) {
                     reader.read_exact(&mut value).unwrap();
                     Parameter::deserialize(std::str::from_utf8(&value).unwrap()).unwrap()
                 };
-                sender.send(Message::UpdateData(name, value));
+                sender.send(Message::UpdateData(name, value)).unwrap();
             }
             b'u' => {
                 let name = {
@@ -625,6 +623,7 @@ fn reader_thread(sender: Sender<Message>) {
                     reader.read_exact(&mut repr).unwrap();
                     Namespaced::deserialize(std::str::from_utf8(&repr).unwrap()).unwrap()
                 };
+                reader.fill_buf().unwrap();
                 reader.consume(1); // Consume ';' delimiter
 
                 let len_value = {
@@ -638,7 +637,7 @@ fn reader_thread(sender: Sender<Message>) {
                     reader.read_exact(&mut value).unwrap();
                     Parameter::deserialize(std::str::from_utf8(&value).unwrap()).unwrap()
                 };
-                sender.send(Message::UpdateRepr(name, repr, value));
+                sender.send(Message::UpdateRepr(name, repr, value)).unwrap();
             }
             b'r' => {
                 let name = {
@@ -646,368 +645,9 @@ fn reader_thread(sender: Sender<Message>) {
                     reader.read_line(&mut name).unwrap();
                     name
                 };
-                sender.send(Message::RemoveData(name));
+                sender.send(Message::RemoveData(name)).unwrap();
             }
             _ => {}
         }
     }
 }
-
-/*
-fn recursive_ui<'a>(
-    ui: &mut egui::Ui,
-    values: &mut Values,
-    modified_variables: &mut Vec<(String, TrackedDataValue)>,
-    variables: impl Iterator<Item = &'a TrackedData>,
-    triggers: impl Iterator<Item = String>,
-    namespace: String,
-) {
-    for TrackedData {
-        name,
-        data_type: var,
-        triggers,
-    } in variables
-    {
-        ui.label(name.clone());
-        let namespaced_name = format!("{}:{}", namespace, name);
-        match &var {
-            TrackedDataRepr::Struct {
-                name,
-                fields,
-                triggers,
-            } => {
-                ui.collapsing(name, |ui| {
-                    egui::Grid::new(format!("{}_grid", &namespaced_name))
-                        .striped(true)
-                        .spacing([40.0, 4.0])
-                        .show(ui, |ui| {
-                            recursive_ui(
-                                ui,
-                                values,
-                                modified_variables,
-                                fields.iter(),
-                                triggers.clone().into_iter(),
-                                namespaced_name,
-                            )
-                        });
-                });
-            }
-            TrackedDataRepr::Enum {
-                name,
-                variants,
-                fields,
-                triggers,
-            } => {
-                ui.collapsing(name, |ui| {
-                    egui::Grid::new(format!("{}_grid", &namespaced_name))
-                        .striped(true)
-                        .spacing([40.0, 4.0])
-                        .show(ui, |ui| {
-                            let selected_variant = values
-                                .enum_variant
-                                .entry(namespaced_name.clone())
-                                .or_default();
-                            let mut changed = false;
-                            egui::ComboBox::from_id_source(format!("{}_variant", &namespaced_name))
-                                .selected_text(selected_variant.clone())
-                                .show_ui(ui, |ui| {
-                                    for variant in variants {
-                                        changed |= ui
-                                            .selectable_value(
-                                                selected_variant,
-                                                variant.clone(),
-                                                variant,
-                                            )
-                                            .clicked();
-                                    }
-                                });
-                            if changed {
-                                modified_variables.push((
-                                    namespaced_name.clone(),
-                                    TrackedDataValue::EnumVariant(
-                                        values
-                                            .enum_variant
-                                            .entry(namespaced_name.clone())
-                                            .or_default()
-                                            .clone(),
-                                    ),
-                                ))
-                            }
-                            ui.end_row();
-                            recursive_ui(
-                                ui,
-                                values,
-                                modified_variables,
-                                fields.iter(),
-                                triggers.clone().into_iter(),
-                                namespaced_name,
-                            )
-                        });
-                });
-            }
-            TrackedDataRepr::SignedSlider {
-                storage_min,
-                storage_max,
-                suggested_min,
-                suggested_max,
-            } => {
-                ui.add(
-                    egui::Slider::from_get_set(
-                        (*suggested_min) as f64..=(*suggested_max) as f64,
-                        |val| *match val {
-                            Some(val) => {
-                                values.i64.insert(
-                                    namespaced_name.clone(),
-                                    (val as i64).clamp(*storage_min, *storage_max),
-                                );
-                                let v = values.i64.get(&namespaced_name).unwrap();
-                                modified_variables.push((
-                                    namespaced_name.clone(),
-                                    livemod::TrackedDataValue::SignedInt(*v),
-                                ));
-                                v
-                            }
-                            None => values.i64.entry(namespaced_name.clone()).or_default(),
-                        } as f64,
-                    )
-                    .integer(),
-                );
-            }
-            TrackedDataRepr::UnsignedSlider {
-                storage_min,
-                storage_max,
-                suggested_min,
-                suggested_max,
-            } => {
-                ui.add(
-                    egui::Slider::from_get_set(
-                        (*suggested_min) as f64..=(*suggested_max) as f64,
-                        |val| *match val {
-                            Some(val) => {
-                                values.u64.insert(
-                                    namespaced_name.clone(),
-                                    (val as u64).clamp(*storage_min, *storage_max),
-                                );
-                                let v = values.u64.get(&namespaced_name).unwrap();
-                                modified_variables.push((
-                                    namespaced_name.clone(),
-                                    livemod::TrackedDataValue::UnsignedInt(*v),
-                                ));
-                                v
-                            }
-                            None => values.u64.entry(namespaced_name.clone()).or_default(),
-                        } as f64,
-                    )
-                    .integer(),
-                );
-            }
-            TrackedDataRepr::FloatSlider {
-                storage_min,
-                storage_max,
-                suggested_min,
-                suggested_max,
-            } => {
-                ui.add(egui::Slider::from_get_set(
-                    (*suggested_min) as f64..=(*suggested_max) as f64,
-                    |val| *match val {
-                        Some(val) => {
-                            values.f64.insert(
-                                namespaced_name.clone(),
-                                val.clamp(*storage_min, *storage_max),
-                            );
-                            let v = values.f64.get(&namespaced_name).unwrap();
-                            modified_variables.push((
-                                namespaced_name.clone(),
-                                livemod::TrackedDataValue::Float(*v),
-                            ));
-                            v
-                        }
-                        None => values.f64.entry(namespaced_name.clone()).or_default(),
-                    },
-                ));
-            }
-            TrackedDataRepr::SignedInteger { min, max } => {
-                if ui
-                    .add(
-                        egui::DragValue::new(
-                            values.i64.entry(namespaced_name.clone()).or_default(),
-                        )
-                        .clamp_range(*min..=*max),
-                    )
-                    .changed()
-                {
-                    modified_variables.push((
-                        namespaced_name.clone(),
-                        livemod::TrackedDataValue::SignedInt(
-                            *values.i64.entry(namespaced_name.clone()).or_default(),
-                        ),
-                    ));
-                }
-            }
-            TrackedDataRepr::UnsignedInteger { min, max } => {
-                if ui
-                    .add(
-                        egui::DragValue::new(
-                            values.u64.entry(namespaced_name.clone()).or_default(),
-                        )
-                        .clamp_range(*min..=*max),
-                    )
-                    .changed()
-                {
-                    modified_variables.push((
-                        namespaced_name.clone(),
-                        livemod::TrackedDataValue::UnsignedInt(
-                            *values.u64.entry(namespaced_name.clone()).or_default(),
-                        ),
-                    ));
-                }
-            }
-            TrackedDataRepr::Float { min, max } => {
-                if ui
-                    .add(
-                        egui::DragValue::new(
-                            values.f64.entry(namespaced_name.clone()).or_default(),
-                        )
-                        .clamp_range(*min..=*max),
-                    )
-                    .changed()
-                {
-                    modified_variables.push((
-                        namespaced_name.clone(),
-                        livemod::TrackedDataValue::Float(
-                            *values.f64.entry(namespaced_name.clone()).or_default(),
-                        ),
-                    ));
-                }
-            }
-            TrackedDataRepr::Bool => {
-                if ui
-                    .checkbox(values.bool.entry(namespaced_name.clone()).or_default(), "")
-                    .changed()
-                {
-                    modified_variables.push((
-                        namespaced_name.clone(),
-                        livemod::TrackedDataValue::Bool(
-                            *values.bool.entry(namespaced_name.clone()).or_default(),
-                        ),
-                    ));
-                }
-            }
-            TrackedDataRepr::Trigger { name } => {
-                if ui.button(&name).clicked() {
-                    modified_variables.push((
-                        format!("{}:{}", namespaced_name, name),
-                        livemod::TrackedDataValue::Trigger,
-                    ));
-                }
-            }
-            TrackedDataRepr::String { multiline } => {
-                if if *multiline {
-                    ui.text_edit_multiline(values.str.entry(namespaced_name.clone()).or_default())
-                } else {
-                    ui.text_edit_singleline(values.str.entry(namespaced_name.clone()).or_default())
-                }
-                .changed()
-                {
-                    modified_variables.push((
-                        namespaced_name.clone(),
-                        livemod::TrackedDataValue::String(
-                            values
-                                .str
-                                .entry(namespaced_name.clone())
-                                .or_default()
-                                .clone(),
-                        ),
-                    ));
-                }
-            }
-        }
-        for trigger_name in triggers {
-            if ui.button(&trigger_name).clicked() {
-                modified_variables.push((
-                    format!("{};{}.{}", namespace, name, trigger_name),
-                    livemod::TrackedDataValue::Trigger,
-                ));
-            }
-        }
-        ui.end_row();
-    }
-    for name in triggers {
-        if ui.button(&name).clicked() {
-            modified_variables.push((
-                format!("{};{}", namespace, name),
-                livemod::TrackedDataValue::Trigger,
-            ));
-        }
-    }
-}
-
-fn reader_thread(sender: Sender<Message>) {
-    for line in BufReader::new(std::io::stdin()).lines() {
-        let line_string = line.unwrap();
-        let line = line_string.as_bytes();
-        let segments = line[1..].split(|c| *c == b';').collect::<Vec<_>>();
-        match line[0] {
-            b'\0' => {
-                sender.send(Message::Quit).unwrap();
-                break;
-            }
-            b'n' => {
-                // New variable to track
-                sender
-                    .send(Message::NewData(
-                        String::from_utf8(segments[0].to_owned()).unwrap(),
-                        Namespaced::deserialize(
-                            std::str::from_utf8(&segments[1]).unwrap(),
-                        )
-                        .unwrap(),
-                        Parameter::deserialize(
-                            std::str::from_utf8(&segments[2]).unwrap(),
-                        )
-                        .unwrap(),
-                    ))
-                    .unwrap();
-            }
-            b's' => {
-                // Variable was updated
-                sender
-                    .send(Message::UpdateData(
-                        String::from_utf8(segments[0].to_owned()).unwrap(),
-                        Parameter::deserialize(
-                            std::str::from_utf8(&segments[1]).unwrap(),
-                        )
-                        .unwrap(),
-                    ))
-                    .unwrap();
-            }
-            b'u' => {
-                // Variable representation was updated
-                sender
-                    .send(Message::UpdateRepr(
-                        String::from_utf8(segments[0].to_owned()).unwrap(),
-                        Namespaced::deserialize(
-                            std::str::from_utf8(&segments[1]).unwrap(),
-                        )
-                        .unwrap(),
-                        Parameter::deserialize(
-                            std::str::from_utf8(&segments[2]).unwrap(),
-                        )
-                        .unwrap(),
-                    ))
-                    .unwrap();
-            }
-            b'r' => {
-                // Variable was dropped
-                sender
-                    .send(Message::RemoveData(
-                        String::from_utf8(segments[0].to_owned()).unwrap(),
-                    ))
-                    .unwrap()
-            }
-            _ => {
-                debug_assert!(false, "Unexpected input: {}", line_string);
-            }
-        }
-    }
-}
-*/

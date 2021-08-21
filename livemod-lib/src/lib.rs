@@ -245,13 +245,17 @@ impl<T> Namespaced<T> {
 
         let mut parameters = LinkedHashMap::new();
         let mut nested_level = 0;
-        for s in params[..params.len() - 1].split(|c| {
-            match c {
-                '{' => { nested_level += 1; false },
-                '}' => { nested_level -= 1; false },
-                ',' if nested_level == 0 => true,
-                _ => false,
+        for s in params[..params.len() - 1].split(|c| match c {
+            '{' => {
+                nested_level += 1;
+                false
             }
+            '}' => {
+                nested_level -= 1;
+                false
+            }
+            ',' if nested_level == 0 => true,
+            _ => false,
         }) {
             if s.is_empty() {
                 continue;
@@ -670,13 +674,7 @@ where
                     })
                     .chain(std::iter::once((
                         "len".to_owned(),
-                        Parameter::Namespaced(
-                            BuiltinRepr::UnsignedInteger {
-                                min: usize::MIN as u64,
-                                max: usize::MAX as u64,
-                            }
-                            .into(),
-                        ),
+                        Parameter::UnsignedInt(self.len() as u64),
                     )))
                     .collect(),
                 _marker: std::marker::PhantomData,
@@ -696,7 +694,7 @@ where
                     false
                 }
             } else {
-                self[field.parse::<usize>().unwrap()].accept(field_target, value)
+                self[dbg!(field).parse::<usize>().unwrap()].accept(field_target, value)
             }
         } else {
             let trigger = value.try_into_namespaced().unwrap();

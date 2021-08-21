@@ -1,8 +1,8 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use livemod::{
-    livemod_static, ActionTarget, LiveMod, LiveModHandle, Multiline, Slider, TriggerFn,
-    Namespaced, Parameter, Repr, Value,
+    livemod_static, ActionTarget, LiveMod, LiveModHandle, Multiline, Namespaced, Parameter, Repr,
+    Slider, TriggerFn, Value,
 };
 
 livemod_static! {
@@ -92,7 +92,8 @@ impl LiveMod for Data {
             storage_max: u32::MAX as u64,
             suggested_min: 1,
             suggested_max: 100,
-        }.into()
+        }
+        .into()
     }
 
     fn accept(&mut self, target: ActionTarget, value: Parameter<Value>) -> bool {
