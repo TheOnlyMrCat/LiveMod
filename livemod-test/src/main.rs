@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::{collections::HashMap, sync::atomic::{AtomicBool, Ordering}};
 
 use livemod::{
     livemod_static, ActionTarget, LiveMod, LiveModHandle, Multiline, Namespaced, Parameter, Repr,
@@ -27,6 +27,7 @@ fn main() {
     // );
     let mut can_remove = Some(livemod.create_variable("Remove me", false));
     let _vector = livemod.create_variable("Vector", vec![6.4, 8.2]);
+    let _map = livemod.create_variable("Map", HashMap::<String, u32>::new());
     let _trigger = unsafe {
         // SAFETY: `running` is dropped after `livemod`.
         livemod.create_variable_unchecked(

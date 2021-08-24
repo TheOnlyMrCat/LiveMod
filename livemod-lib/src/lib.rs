@@ -736,6 +736,74 @@ where
     }
 }
 
+impl<V> LiveMod for std::collections::HashMap<String, V>
+where
+    V: LiveMod + Default,
+{
+    fn repr_default(&self, target: ActionTarget) -> Namespaced<Repr> {
+        if let Some((field, field_target)) = target.strip_one_field() {
+            self[field].repr_default(field_target)
+        } else {
+            Namespaced {
+                name: vec!["livemod".to_owned(), "map".to_owned(), "string".to_owned()],
+                parameters: self
+                    .iter()
+                    .map(|(k, v)| {
+                        (
+                            k.to_owned(),
+                            Parameter::Namespaced(v.repr_default(ActionTarget::This)),
+                        )
+                    })
+                    .collect(),
+                _marker: std::marker::PhantomData,
+            }
+        }
+    }
+
+    fn accept(&mut self, target: ActionTarget, value: Parameter<Value>) -> bool {
+        if let Some((field, field_target)) = target.strip_one_field() {
+            self.get_mut(field).unwrap().accept(field_target, value)
+        } else {
+            match value {
+                Parameter::Namespaced(trigger) => {
+                    if trigger.name[2] == "rm" {
+                        let key = trigger.parameters["key"]
+                            .clone()
+                            .try_into_string()
+                            .unwrap();
+                        self.remove(&key);
+                    }
+                }
+                Parameter::String(s) => {
+                    self.insert(s, Default::default());
+                }
+                _ => panic!(),
+            }
+            true
+        }
+    }
+
+    fn get_self(&self, target: ActionTarget) -> Parameter<Value> {
+        if let Some((field, field_target)) = target.strip_one_field() {
+            self[field].get_self(field_target)
+        } else {
+            Parameter::Namespaced(Namespaced {
+                name: vec!["livemod".to_owned(), "map".to_owned(), "string".to_owned()],
+                parameters: self
+                    .iter()
+                    .map(|(k, v)| {
+                        (
+                            k.to_owned(),
+                            v.get_self(ActionTarget::This),
+                        )
+                    })
+                    .collect(),
+                _marker: std::marker::PhantomData,
+            })
+        }
+    }
+}
+
 pub struct TriggerFn<A, F: FnMut(&mut A)> {
     arg: A,
     func: F,

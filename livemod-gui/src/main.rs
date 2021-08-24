@@ -339,6 +339,43 @@ fn draw_repr(ui: &mut egui::Ui, repr: &Namespaced<Repr>, namespace: String, stat
                         });
                 });
             }
+            "map" => {
+                ui.collapsing("Map", |ui| {
+                    egui::Grid::new(&namespace)
+                        .striped(true)
+                        .spacing([40.0, 4.0])
+                        .show(ui, |ui| {
+                            match repr.name[2].as_str() {
+                                "string" => {
+                                    for (key, value) in &repr.parameters {
+                                        let field_namespace = format!("{}.{}", namespace, key);
+                                        let field = value.as_namespaced().unwrap();
+                                        ui.label(key); //TODO: Make this a text field
+                                        draw_repr(ui, field, field_namespace, state);
+                                        //TODO: Add remove button, insert button, etc.
+                                        ui.end_row();
+                                    }
+                                    ui.separator();
+                                    ui.end_row();
+                                    ui.label("Insert:");
+                                    let mut key = state.tracked_data.entry(format!("{}", namespace)).or_insert(TrackedParameter::String("".to_string()));
+                                    match key {
+                                        TrackedParameter::String(ref mut key) => {}
+                                        _ => {
+                                            *key = TrackedParameter::String("".to_owned());
+                                        }
+                                    }
+                                    ui.text_edit_singleline(key.as_string_mut().unwrap());
+                                    ui.small_button("+").clicked().then(|| {
+                                        state.modified_data.push(format!("{}", namespace));
+                                    });
+                                    ui.end_row();
+                                },
+                                _ => todo!()
+                            }
+                        });
+                });
+            }
             "bool" => {
                 ui.checkbox(
                     state
