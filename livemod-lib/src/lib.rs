@@ -764,20 +764,13 @@ where
         if let Some((field, field_target)) = target.strip_one_field() {
             self.get_mut(field).unwrap().accept(field_target, value)
         } else {
-            match value {
-                Parameter::Namespaced(trigger) => {
-                    if trigger.name[2] == "rm" {
-                        let key = trigger.parameters["key"]
-                            .clone()
-                            .try_into_string()
-                            .unwrap();
-                        self.remove(&key);
-                    }
-                }
-                Parameter::String(s) => {
-                    self.insert(s, Default::default());
-                }
-                _ => panic!(),
+            let trigger = value.try_into_namespaced().unwrap();
+            if trigger.name[2] == "rm" {
+                let key = trigger.parameters["key"].clone().try_into_string().unwrap();
+                self.remove(&key);
+            } else if trigger.name[2] == "ins" {
+                let key = trigger.parameters["key"].clone().try_into_string().unwrap();
+                self.insert(key, Default::default());
             }
             true
         }
@@ -791,12 +784,7 @@ where
                 name: vec!["livemod".to_owned(), "map".to_owned(), "string".to_owned()],
                 parameters: self
                     .iter()
-                    .map(|(k, v)| {
-                        (
-                            k.to_owned(),
-                            v.get_self(ActionTarget::This),
-                        )
-                    })
+                    .map(|(k, v)| (k.to_owned(), v.get_self(ActionTarget::This)))
                     .collect(),
                 _marker: std::marker::PhantomData,
             })
