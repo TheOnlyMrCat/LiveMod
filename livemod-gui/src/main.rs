@@ -183,7 +183,7 @@ fn main() {
                                 recursive_insert(format!("{}.{}", namespace, name), param, state);
                             }
                             return;
-                        },
+                        }
                     };
                     state.tracked_data.insert(namespace, parameter);
                 }
@@ -235,7 +235,12 @@ fn main() {
 
             for (name, value) in state.messages.drain(..) {
                 let serialized = value.serialize();
-                println!("s{};{}-{}", &name[1..], serialized.as_bytes().len(), serialized);
+                println!(
+                    "s{};{}-{}",
+                    &name[1..],
+                    serialized.as_bytes().len(),
+                    serialized
+                );
             }
 
             let (needs_repaint, shapes) = egui.end_frame(&display);
@@ -323,11 +328,16 @@ fn draw_repr(ui: &mut egui::Ui, repr: &Namespaced<Repr>, namespace: String, stat
                                     repr.parameters["len"].as_unsigned_int().copied().unwrap(),
                                 ),
                             );
-                            if ui.add(
-                                                            egui::DragValue::new(len.as_unsigned_int_mut().unwrap()).speed(0.1),
-                                                        )
-                                                        .changed() {
-                                state.messages.push((len_field, len.clone().try_into().unwrap()));
+                            if ui
+                                .add(
+                                    egui::DragValue::new(len.as_unsigned_int_mut().unwrap())
+                                        .speed(0.1),
+                                )
+                                .changed()
+                            {
+                                state
+                                    .messages
+                                    .push((len_field, len.clone().try_into().unwrap()));
                             }
                             ui.end_row();
                             for (i, field) in &repr.parameters {
@@ -364,20 +374,35 @@ fn draw_repr(ui: &mut egui::Ui, repr: &Namespaced<Repr>, namespace: String, stat
                                     ui.separator();
                                     ui.end_row();
                                     ui.label("Insert:");
-                                    let mut key = state.tracked_data.entry(format!("{}", namespace)).or_insert(AnyData::Map(HashMap::new()))
-                                        .as_map_mut().unwrap().entry("insert".to_owned()).or_insert(AnyData::String("".to_owned()));
+                                    let mut key = state
+                                        .tracked_data
+                                        .entry(format!("{}", namespace))
+                                        .or_insert(AnyData::Map(HashMap::new()))
+                                        .as_map_mut()
+                                        .unwrap()
+                                        .entry("insert".to_owned())
+                                        .or_insert(AnyData::String("".to_owned()));
                                     ui.text_edit_singleline(key.as_string_mut().unwrap());
                                     if ui.small_button("+").clicked() {
-                                        state.messages.push((format!("{}", namespace), Parameter::Namespaced(Namespaced::new(
-                                            vec!["livemod".to_owned(), "map".to_owned(), "ins".to_owned()],
-                                            std::iter::once(
-                                                ("key".to_owned(), key.clone().try_into().unwrap())
-                                            ).collect(),
-                                        ))));
+                                        state.messages.push((
+                                            format!("{}", namespace),
+                                            Parameter::Namespaced(Namespaced::new(
+                                                vec![
+                                                    "livemod".to_owned(),
+                                                    "map".to_owned(),
+                                                    "ins".to_owned(),
+                                                ],
+                                                std::iter::once((
+                                                    "key".to_owned(),
+                                                    key.clone().try_into().unwrap(),
+                                                ))
+                                                .collect(),
+                                            )),
+                                        ));
                                     }
                                     ui.end_row();
-                                },
-                                _ => todo!()
+                                }
+                                _ => todo!(),
                             }
                         });
                 });
@@ -387,12 +412,12 @@ fn draw_repr(ui: &mut egui::Ui, repr: &Namespaced<Repr>, namespace: String, stat
                     .tracked_data
                     .entry(namespace.clone())
                     .or_insert(AnyData::Bool(false));
-                if ui.checkbox(
-                                    value.as_bool_mut().unwrap(),
-                                    "",
-                                )
-                                .changed() {
-                    Some(state.messages.push((namespace, value.clone().try_into().unwrap())))
+                if ui.checkbox(value.as_bool_mut().unwrap(), "").changed() {
+                    Some(
+                        state
+                            .messages
+                            .push((namespace, value.clone().try_into().unwrap())),
+                    )
                 } else {
                     None
                 };
@@ -406,10 +431,13 @@ fn draw_repr(ui: &mut egui::Ui, repr: &Namespaced<Repr>, namespace: String, stat
                 )
                 .clicked()
                 .then(|| {
-                    state.messages.push((namespace, Parameter::Namespaced(Namespaced::new(
-                        vec!["livemod".to_owned(), "trigger".to_owned()],
-                        std::iter::empty().collect(),
-                    ))));
+                    state.messages.push((
+                        namespace,
+                        Parameter::Namespaced(Namespaced::new(
+                            vec!["livemod".to_owned(), "trigger".to_owned()],
+                            std::iter::empty().collect(),
+                        )),
+                    ));
                 });
             }
             "string" => {
@@ -418,25 +446,22 @@ fn draw_repr(ui: &mut egui::Ui, repr: &Namespaced<Repr>, namespace: String, stat
                     .entry(namespace.clone())
                     .or_insert(AnyData::String("".to_owned()));
                 if if repr
-                                    .parameters
-                                    .get("multiline")
-                                    .and_then(|p| p.as_bool().cloned())
-                                    .unwrap_or(false)
-                                {
-                                    ui.text_edit_multiline(
-                                        value
-                                            .as_string_mut()
-                                            .unwrap(),
-                                    )
-                                } else {
-                                    ui.text_edit_singleline(
-                                        value
-                                            .as_string_mut()
-                                            .unwrap(),
-                                    )
-                                }
-                                .changed() {
-                    Some(state.messages.push((namespace, value.clone().try_into().unwrap())))
+                    .parameters
+                    .get("multiline")
+                    .and_then(|p| p.as_bool().cloned())
+                    .unwrap_or(false)
+                {
+                    ui.text_edit_multiline(value.as_string_mut().unwrap())
+                } else {
+                    ui.text_edit_singleline(value.as_string_mut().unwrap())
+                }
+                .changed()
+                {
+                    Some(
+                        state
+                            .messages
+                            .push((namespace, value.clone().try_into().unwrap())),
+                    )
                 } else {
                     None
                 };
@@ -452,33 +477,42 @@ fn draw_repr(ui: &mut egui::Ui, repr: &Namespaced<Repr>, namespace: String, stat
                     .parameters
                     .get("suggested_max")
                     .and_then(|p| p.as_signed_int().copied());
-                
-                let value = state.tracked_data.entry(namespace.clone()).or_insert(AnyData::SignedInt(0));
-                if if let (Some(suggested_min), Some(suggested_max)) = (suggested_min, suggested_max) {
-                                    ui.add(
-                                        egui::Slider::from_get_set(
-                                            suggested_min as f64..=suggested_max as f64,
-                                            |val| match val {
-                                                Some(val) => {
-                                                    //TODO: Clamp *before* casting?
-                                                    let new_val = (val as i64).clamp(min, max);
-                                                    *value = AnyData::SignedInt(new_val);
-                                                    new_val as f64
-                                                }
-                                                None => value.as_signed_int().copied().unwrap() as f64,
-                                            } as f64,
-                                        )
-                                        .integer()
-                                    )
-                                } else {
-                                    ui.add(
-                                        egui::DragValue::new(
-                                            value.as_signed_int_mut().unwrap(),
-                                        )
-                                        .clamp_range(min..=max),
-                                    )
-                                }.changed() {
-                    Some(state.messages.push((namespace, value.clone().try_into().unwrap())))
+
+                let value = state
+                    .tracked_data
+                    .entry(namespace.clone())
+                    .or_insert(AnyData::SignedInt(0));
+                if if let (Some(suggested_min), Some(suggested_max)) =
+                    (suggested_min, suggested_max)
+                {
+                    ui.add(
+                        egui::Slider::from_get_set(
+                            suggested_min as f64..=suggested_max as f64,
+                            |val| match val {
+                                Some(val) => {
+                                    //TODO: Clamp *before* casting?
+                                    let new_val = (val as i64).clamp(min, max);
+                                    *value = AnyData::SignedInt(new_val);
+                                    new_val as f64
+                                }
+                                None => value.as_signed_int().copied().unwrap() as f64,
+                            } as f64,
+                        )
+                        .integer(),
+                    )
+                } else {
+                    ui.add(
+                        egui::DragValue::new(value.as_signed_int_mut().unwrap())
+                            .clamp_range(min..=max),
+                    )
+                }
+                .changed()
+                {
+                    Some(
+                        state
+                            .messages
+                            .push((namespace, value.clone().try_into().unwrap())),
+                    )
                 } else {
                     None
                 };
@@ -495,31 +529,40 @@ fn draw_repr(ui: &mut egui::Ui, repr: &Namespaced<Repr>, namespace: String, stat
                     .get("suggested_max")
                     .and_then(|p| p.as_unsigned_int().copied());
 
-                let value = state.tracked_data.entry(namespace.clone()).or_insert(AnyData::UnsignedInt(0));
-                if if let (Some(suggested_min), Some(suggested_max)) = (suggested_min, suggested_max) {
-                                    ui.add(
-                                        egui::Slider::from_get_set(
-                                            suggested_min as f64..=suggested_max as f64,
-                                            |val| match val {
-                                                Some(val) => {
-                                                    let new_val = (val as u64).clamp(min, max);
-                                                    *value = AnyData::UnsignedInt(new_val);
-                                                    new_val as f64
-                                                }
-                                                None => value.as_unsigned_int().copied().unwrap() as f64,
-                                            },
-                                        )
-                                        .integer()
-                                    )
-                                } else {
-                                    ui.add(
-                                        egui::DragValue::new(
-                                            value.as_unsigned_int_mut().unwrap(),
-                                        )
-                                        .clamp_range(min..=max),
-                                    )
-                                }.changed() {
-                    Some(state.messages.push((namespace, value.clone().try_into().unwrap())))
+                let value = state
+                    .tracked_data
+                    .entry(namespace.clone())
+                    .or_insert(AnyData::UnsignedInt(0));
+                if if let (Some(suggested_min), Some(suggested_max)) =
+                    (suggested_min, suggested_max)
+                {
+                    ui.add(
+                        egui::Slider::from_get_set(
+                            suggested_min as f64..=suggested_max as f64,
+                            |val| match val {
+                                Some(val) => {
+                                    let new_val = (val as u64).clamp(min, max);
+                                    *value = AnyData::UnsignedInt(new_val);
+                                    new_val as f64
+                                }
+                                None => value.as_unsigned_int().copied().unwrap() as f64,
+                            },
+                        )
+                        .integer(),
+                    )
+                } else {
+                    ui.add(
+                        egui::DragValue::new(value.as_unsigned_int_mut().unwrap())
+                            .clamp_range(min..=max),
+                    )
+                }
+                .changed()
+                {
+                    Some(
+                        state
+                            .messages
+                            .push((namespace, value.clone().try_into().unwrap())),
+                    )
                 } else {
                     None
                 };
@@ -536,30 +579,36 @@ fn draw_repr(ui: &mut egui::Ui, repr: &Namespaced<Repr>, namespace: String, stat
                     .get("suggested_max")
                     .and_then(|p| p.as_float().copied());
 
-                let value = state.tracked_data.entry(namespace.clone()).or_insert(AnyData::Float(0.0));
-                if if let (Some(suggested_min), Some(suggested_max)) = (suggested_min, suggested_max) {
-                                    ui.add(
-                                        egui::Slider::from_get_set(
-                                            suggested_min..=suggested_max,
-                                            |val| match val {
-                                                Some(val) => {
-                                                    let new_val = val.clamp(min, max);
-                                                    *value = AnyData::Float(new_val);
-                                                    new_val
-                                                }
-                                                None => value.as_float().copied().unwrap(),
-                                            },
-                                        )
-                                    )
-                                } else {
-                                    ui.add(
-                                        egui::DragValue::new(
-                                            value.as_float_mut().unwrap(),
-                                        )
-                                        .clamp_range(min..=max),
-                                    )
-                                }.changed() {
-                    Some(state.messages.push((namespace, value.clone().try_into().unwrap())))
+                let value = state
+                    .tracked_data
+                    .entry(namespace.clone())
+                    .or_insert(AnyData::Float(0.0));
+                if if let (Some(suggested_min), Some(suggested_max)) =
+                    (suggested_min, suggested_max)
+                {
+                    ui.add(egui::Slider::from_get_set(
+                        suggested_min..=suggested_max,
+                        |val| match val {
+                            Some(val) => {
+                                let new_val = val.clamp(min, max);
+                                *value = AnyData::Float(new_val);
+                                new_val
+                            }
+                            None => value.as_float().copied().unwrap(),
+                        },
+                    ))
+                } else {
+                    ui.add(
+                        egui::DragValue::new(value.as_float_mut().unwrap()).clamp_range(min..=max),
+                    )
+                }
+                .changed()
+                {
+                    Some(
+                        state
+                            .messages
+                            .push((namespace, value.clone().try_into().unwrap())),
+                    )
                 } else {
                     None
                 };

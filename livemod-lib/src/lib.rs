@@ -466,6 +466,10 @@ pub trait LiveMod {
     fn accept(&mut self, target: ActionTarget, value: Parameter<Value>) -> bool;
 }
 
+pub trait LiveModCtor {
+    fn from_value(value: Parameter<Value>) -> Option<Self> where Self: Sized;
+}
+
 pub trait LiveModRepr<T> {
     fn repr(&self, cur: &T) -> Namespaced<Repr>;
 }
@@ -555,6 +559,12 @@ macro_rules! unsigned_primitive_impl {
                 Parameter::UnsignedInt(*self as u64)
             }
         }
+
+        impl LiveModCtor for $ty {
+            fn from_value(value: Parameter<Value>) -> Option<Self> {
+                value.try_into_unsigned_int().ok().map(|v| v as $ty)
+            }
+        }
         )*
     }
 }
@@ -580,6 +590,12 @@ macro_rules! signed_primitive_impl {
             fn get_self(&self, target: ActionTarget) -> Parameter<Value> {
                 debug_assert!(target.is_this());
                 Parameter::SignedInt(*self as i64)
+            }
+        }
+
+        impl LiveModCtor for $ty {
+            fn from_value(value: Parameter<Value>) -> Option<Self> {
+                value.try_into_signed_int().ok().map(|v| v as $ty)
             }
         }
         )*
@@ -609,6 +625,12 @@ macro_rules! float_primitive_impl {
                 Parameter::Float(*self as f64)
             }
         }
+
+        impl LiveModCtor for $ty {
+            fn from_value(value: Parameter<Value>) -> Option<Self> {
+                value.try_into_float().ok().map(|v| v as $ty)
+            }
+        }
         )*
     }
 }
@@ -635,6 +657,12 @@ impl LiveMod for bool {
     }
 }
 
+impl LiveModCtor for bool {
+    fn from_value(value: Parameter<Value>) -> Option<Self> {
+        value.try_into_bool().ok()
+    }
+}
+
 impl LiveMod for String {
     fn repr_default(&self, target: ActionTarget) -> Namespaced<Repr> {
         debug_assert!(target.is_this());
@@ -650,6 +678,12 @@ impl LiveMod for String {
     fn get_self(&self, target: ActionTarget) -> Parameter<Value> {
         debug_assert!(target.is_this());
         Parameter::String(self.clone())
+    }
+}
+
+impl LiveModCtor for String {
+    fn from_value(value: Parameter<Value>) -> Option<Self> {
+        value.try_into_string().ok()
     }
 }
 
@@ -733,6 +767,25 @@ where
                 _marker: std::marker::PhantomData,
             })
         }
+    }
+}
+
+impl<T> LiveModCtor for Vec<T>
+where
+    T: LiveModCtor,
+{
+    fn from_value(value: Parameter<Value>) -> Option<Self> {
+        value.try_into_namespaced().ok().and_then(|ns| {
+            if ns.name[2] == "vec" {
+                let mut vec = Vec::new();
+                for (_, v) in ns.parameters.into_iter() {
+                    vec.push(T::from_value(v).unwrap());
+                }
+                Some(vec)
+            } else {
+                None
+            }
+        })
     }
 }
 
