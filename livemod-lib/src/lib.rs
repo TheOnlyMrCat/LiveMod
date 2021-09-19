@@ -1,6 +1,7 @@
 //! # livemod - Runtime modification of program parameters
 
 use std::array::IntoIter;
+use std::hash::Hash;
 use std::iter::FromIterator;
 use std::ops::RangeInclusive;
 
@@ -466,7 +467,8 @@ pub trait LiveMod {
     fn accept(&mut self, target: ActionTarget, value: Parameter<Value>) -> bool;
 }
 
-pub trait LiveModCtor {
+pub trait LiveModCtor: LiveMod {
+    fn repr_static() -> Namespaced<Repr>;
     fn from_value(value: Parameter<Value>) -> Option<Self> where Self: Sized;
 }
 
@@ -542,10 +544,7 @@ macro_rules! unsigned_primitive_impl {
         impl LiveMod for $ty {
             fn repr_default(&self, target: ActionTarget) -> Namespaced<Repr> {
                 debug_assert!(target.is_this());
-                BuiltinRepr::UnsignedInteger {
-                    min: $ty::MIN as u64,
-                    max: $ty::MAX as u64,
-                }.into()
+                Self::repr_static()
             }
 
             fn accept(&mut self, target: ActionTarget, value: Parameter<Value>) -> bool {
@@ -561,6 +560,13 @@ macro_rules! unsigned_primitive_impl {
         }
 
         impl LiveModCtor for $ty {
+            fn repr_static() -> Namespaced<Repr> {
+                BuiltinRepr::UnsignedInteger {
+                    min: $ty::MIN as u64,
+                    max: $ty::MAX as u64,
+                }.into()
+            }
+
             fn from_value(value: Parameter<Value>) -> Option<Self> {
                 value.try_into_unsigned_int().ok().map(|v| v as $ty)
             }
@@ -575,10 +581,7 @@ macro_rules! signed_primitive_impl {
         impl LiveMod for $ty {
             fn repr_default(&self, target: ActionTarget) -> Namespaced<Repr> {
                 debug_assert!(target.is_this());
-                BuiltinRepr::SignedInteger {
-                    min: $ty::MIN as i64,
-                    max: $ty::MAX as i64,
-                }.into()
+                Self::repr_static()
             }
 
             fn accept(&mut self, target: ActionTarget, value: Parameter<Value>) -> bool {
@@ -594,6 +597,13 @@ macro_rules! signed_primitive_impl {
         }
 
         impl LiveModCtor for $ty {
+            fn repr_static() -> Namespaced<Repr> {
+                BuiltinRepr::SignedInteger {
+                    min: $ty::MIN as i64,
+                    max: $ty::MAX as i64,
+                }.into()
+            }
+
             fn from_value(value: Parameter<Value>) -> Option<Self> {
                 value.try_into_signed_int().ok().map(|v| v as $ty)
             }
@@ -608,10 +618,7 @@ macro_rules! float_primitive_impl {
         impl LiveMod for $ty {
             fn repr_default(&self, target: ActionTarget) -> Namespaced<Repr> {
                 debug_assert!(target.is_this());
-                BuiltinRepr::Float {
-                    min: $ty::MIN as f64,
-                    max: $ty::MAX as f64,
-                }.into()
+                Self::repr_static()
             }
 
             fn accept(&mut self, target: ActionTarget, value: Parameter<Value>) -> bool {
@@ -627,6 +634,13 @@ macro_rules! float_primitive_impl {
         }
 
         impl LiveModCtor for $ty {
+            fn repr_static() -> Namespaced<Repr> {
+                BuiltinRepr::Float {
+                    min: $ty::MIN as f64,
+                    max: $ty::MAX as f64,
+                }.into()
+            }
+
             fn from_value(value: Parameter<Value>) -> Option<Self> {
                 value.try_into_float().ok().map(|v| v as $ty)
             }
@@ -642,7 +656,7 @@ float_primitive_impl!(f32, f64);
 impl LiveMod for bool {
     fn repr_default(&self, target: ActionTarget) -> Namespaced<Repr> {
         debug_assert!(target.is_this());
-        BuiltinRepr::Bool.into()
+        Self::repr_static()
     }
 
     fn accept(&mut self, target: ActionTarget, value: Parameter<Value>) -> bool {
@@ -658,6 +672,10 @@ impl LiveMod for bool {
 }
 
 impl LiveModCtor for bool {
+    fn repr_static() -> Namespaced<Repr> {
+        BuiltinRepr::Bool.into()
+    }
+
     fn from_value(value: Parameter<Value>) -> Option<Self> {
         value.try_into_bool().ok()
     }
@@ -666,7 +684,7 @@ impl LiveModCtor for bool {
 impl LiveMod for String {
     fn repr_default(&self, target: ActionTarget) -> Namespaced<Repr> {
         debug_assert!(target.is_this());
-        BuiltinRepr::String { multiline: false }.into()
+        Self::repr_static()
     }
 
     fn accept(&mut self, target: ActionTarget, value: Parameter<Value>) -> bool {
@@ -682,6 +700,10 @@ impl LiveMod for String {
 }
 
 impl LiveModCtor for String {
+    fn repr_static() -> Namespaced<Repr> {
+        BuiltinRepr::String { multiline: false }.into()
+    }
+
     fn from_value(value: Parameter<Value>) -> Option<Self> {
         value.try_into_string().ok()
     }
@@ -770,9 +792,10 @@ where
     }
 }
 
+/*
 impl<T> LiveModCtor for Vec<T>
 where
-    T: LiveModCtor,
+    T: LiveModCtor + Default,
 {
     fn from_value(value: Parameter<Value>) -> Option<Self> {
         value.try_into_namespaced().ok().and_then(|ns| {
@@ -788,26 +811,56 @@ where
         })
     }
 }
+*/
 
-impl<V> LiveMod for std::collections::HashMap<String, V>
+impl<K, V> LiveMod for std::collections::HashMap<K, V>
 where
+    K: LiveModCtor + Eq + Hash,
     V: LiveMod + Default,
 {
     fn repr_default(&self, target: ActionTarget) -> Namespaced<Repr> {
         if let Some((field, field_target)) = target.strip_one_field() {
-            self[field].repr_default(field_target)
+            self.get(&K::from_value(Parameter::deserialize(field).unwrap()).unwrap()).unwrap().repr_default(field_target)
         } else {
             Namespaced {
-                name: vec!["livemod".to_owned(), "map".to_owned(), "string".to_owned()],
-                parameters: self
-                    .iter()
-                    .map(|(k, v)| {
-                        (
-                            k.to_owned(),
-                            Parameter::Namespaced(v.repr_default(ActionTarget::This)),
-                        )
-                    })
-                    .collect(),
+                name: vec!["livemod".to_owned(), "map".to_owned()],
+                parameters: IntoIter::new([
+                    ("key".to_owned(), Parameter::Namespaced(K::repr_static())),
+                    (
+                        "keys".to_owned(),
+                        Parameter::Namespaced(Namespaced {
+                            name: vec!["livemod".to_owned(), "fields".to_owned()],
+                            parameters: self
+                                .iter()
+                                .enumerate()
+                                .map(|(i, (k, _v))| {
+                                    (
+                                        format!("{}", i),
+                                        Parameter::Namespaced(k.repr_default(ActionTarget::This)),
+                                    )
+                                })
+                                .collect(),
+                            _marker: std::marker::PhantomData,
+                        })
+                    ),
+                    (
+                        "values".to_owned(),
+                        Parameter::Namespaced(Namespaced {
+                            name: vec!["livemod".to_owned(), "fields".to_owned()],
+                            parameters: self
+                                .iter()
+                                .enumerate()
+                                .map(|(i, (_k, v))| {
+                                    (
+                                        format!("{}", i),
+                                        Parameter::Namespaced(v.repr_default(ActionTarget::This)),
+                                    )
+                                })
+                                .collect(),
+                            _marker: std::marker::PhantomData,
+                        })
+                    )
+                ]).collect(),
                 _marker: std::marker::PhantomData,
             }
         }
@@ -815,14 +868,16 @@ where
 
     fn accept(&mut self, target: ActionTarget, value: Parameter<Value>) -> bool {
         if let Some((field, field_target)) = target.strip_one_field() {
-            self.get_mut(field).unwrap().accept(field_target, value)
+            self.get_mut(&K::from_value(Parameter::deserialize(field).unwrap()).unwrap()).unwrap().accept(field_target, value)
         } else {
             let trigger = value.try_into_namespaced().unwrap();
             if trigger.name[2] == "rm" {
                 let key = trigger.parameters["key"].clone().try_into_string().unwrap();
+                let key = K::from_value(Parameter::deserialize(&key).unwrap()).unwrap();
                 self.remove(&key);
             } else if trigger.name[2] == "ins" {
                 let key = trigger.parameters["key"].clone().try_into_string().unwrap();
+                let key = K::from_value(Parameter::deserialize(&key).unwrap()).unwrap();
                 self.insert(key, Default::default());
             }
             true
@@ -831,14 +886,46 @@ where
 
     fn get_self(&self, target: ActionTarget) -> Parameter<Value> {
         if let Some((field, field_target)) = target.strip_one_field() {
-            self[field].get_self(field_target)
+            self.get(&K::from_value(Parameter::deserialize(field).unwrap()).unwrap()).unwrap().get_self(field_target)
         } else {
             Parameter::Namespaced(Namespaced {
-                name: vec!["livemod".to_owned(), "map".to_owned(), "string".to_owned()],
-                parameters: self
-                    .iter()
-                    .map(|(k, v)| (k.to_owned(), v.get_self(ActionTarget::This)))
-                    .collect(),
+                name: vec!["livemod".to_owned(), "map".to_owned()],
+                parameters: IntoIter::new([
+                    (
+                        "keys".to_owned(),
+                        Parameter::Namespaced(Namespaced {
+                            name: vec!["livemod".to_owned(), "fields".to_owned()],
+                            parameters: self
+                                .iter()
+                                .enumerate()
+                                .map(|(i, (k, _v))| {
+                                    (
+                                        format!("{}", i),
+                                        k.get_self(ActionTarget::This),
+                                    )
+                                })
+                                .collect(),
+                            _marker: std::marker::PhantomData,
+                        })
+                    ),
+                    (
+                        "values".to_owned(),
+                        Parameter::Namespaced(Namespaced {
+                            name: vec!["livemod".to_owned(), "fields".to_owned()],
+                            parameters: self
+                                .iter()
+                                .enumerate()
+                                .map(|(i, (_k, v))| {
+                                    (
+                                        format!("{}", i),
+                                        v.get_self(ActionTarget::This),
+                                    )
+                                })
+                                .collect(),
+                            _marker: std::marker::PhantomData,
+                        })
+                    )
+                ]).collect(),
                 _marker: std::marker::PhantomData,
             })
         }

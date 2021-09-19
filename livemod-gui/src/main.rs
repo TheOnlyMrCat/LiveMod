@@ -156,6 +156,8 @@ fn create_display(event_loop: &glutin::event_loop::EventLoop<()>) -> glium::Disp
 }
 
 fn main() {
+    color_eyre::install().unwrap();
+
     let (sender, recv) = mpsc::channel();
     std::thread::spawn(|| reader_thread(sender));
 
@@ -323,7 +325,7 @@ fn draw_repr(ui: &mut egui::Ui, repr: &Namespaced<Repr>, namespace: String, stat
                         .show(ui, |ui| {
                             ui.label("Length");
                             let len_field = format!("{}.len", namespace);
-                            let mut len = state.tracked_data.entry(len_field.clone()).or_insert(
+                            let len = state.tracked_data.entry(len_field.clone()).or_insert(
                                 AnyData::UnsignedInt(
                                     repr.parameters["len"].as_unsigned_int().copied().unwrap(),
                                 ),
@@ -361,49 +363,48 @@ fn draw_repr(ui: &mut egui::Ui, repr: &Namespaced<Repr>, namespace: String, stat
                         .striped(true)
                         .spacing([40.0, 4.0])
                         .show(ui, |ui| {
-                            match repr.name[2].as_str() {
-                                "string" => {
-                                    for (key, value) in &repr.parameters {
-                                        let field_namespace = format!("{}.{}", namespace, key);
-                                        let field = value.as_namespaced().unwrap();
-                                        ui.label(key); //TODO: Make this a text field
-                                        draw_repr(ui, field, field_namespace, state);
-                                        //TODO: Add remove button, insert button, etc.
-                                        ui.end_row();
-                                    }
-                                    ui.separator();
-                                    ui.end_row();
-                                    ui.label("Insert:");
-                                    let mut key = state
-                                        .tracked_data
-                                        .entry(format!("{}", namespace))
-                                        .or_insert(AnyData::Map(HashMap::new()))
-                                        .as_map_mut()
+                            let key = repr.parameters["key"].as_namespaced().unwrap();
+                            for (i, (key, value)) in repr.parameters["keys"]
+                                .as_namespaced()
+                                .unwrap()
+                                .parameters
+                                .iter()
+                                .map(|(i, k)| k.as_namespaced().unwrap())
+                                .zip(
+                                    repr.parameters["values"]
+                                        .as_namespaced()
                                         .unwrap()
-                                        .entry("insert".to_owned())
-                                        .or_insert(AnyData::String("".to_owned()));
-                                    ui.text_edit_singleline(key.as_string_mut().unwrap());
-                                    if ui.small_button("+").clicked() {
-                                        state.messages.push((
-                                            format!("{}", namespace),
-                                            Parameter::Namespaced(Namespaced::new(
-                                                vec![
-                                                    "livemod".to_owned(),
-                                                    "map".to_owned(),
-                                                    "ins".to_owned(),
-                                                ],
-                                                std::iter::once((
-                                                    "key".to_owned(),
-                                                    key.clone().try_into().unwrap(),
-                                                ))
-                                                .collect(),
-                                            )),
-                                        ));
-                                    }
-                                    ui.end_row();
-                                }
-                                _ => todo!(),
+                                        .parameters
+                                        .iter()
+                                        .map(|(i, v)| v.as_namespaced().unwrap()),
+                                )
+                                .enumerate()
+                            {
+                                let key_namespace = format!("{}.keys.{}", namespace, i);
+                                let value_namespace = format!("{}.values.{}", namespace, i);
+                                draw_repr(ui, &key, key_namespace, state);
+                                draw_repr(ui, &value, value_namespace, state);
+                                //TODO: Remove button, etc.
+                                ui.end_row();
                             }
+                            ui.separator();
+                            ui.end_row();
+                            ui.label("Insert:");
+                            draw_repr(ui, &key, format!("{}.insert", namespace), state);
+                            if ui.small_button("+").clicked() {
+                                state.messages.push((
+                                    format!("{}", namespace),
+                                    Parameter::Namespaced(Namespaced::new(
+                                        vec![
+                                            "livemod".to_owned(),
+                                            "map".to_owned(),
+                                            "ins".to_owned(),
+                                        ],
+                                        todo!(),
+                                    )),
+                                ));
+                            }
+                            ui.end_row();
                         });
                 });
             }

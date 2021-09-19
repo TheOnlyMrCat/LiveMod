@@ -8,3 +8,4 @@ livemod-disabled = ["livemod/disabled"]
 
 [dependencies]
 livemod = { path="../livemod-lib", features=["derive"] }
+color-eyre = "0.5"

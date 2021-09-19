@@ -11,6 +11,8 @@ livemod_static! {
 }
 
 fn main() {
+    color_eyre::install().unwrap();
+    
     let running = AtomicBool::new(true);
     let livemod = LiveModHandle::new_gui();
 
