@@ -11,7 +11,6 @@ use livemod::{Namespaced, Parameter, Repr, Value};
 struct State {
     tracked_vars: LinkedHashMap<String, Namespaced<Repr>>,
     tracked_data: HashMap<String, AnyData>,
-    messages: Vec<(String, Parameter<Value>)>,
 }
 
 #[derive(Debug, Clone)]
@@ -156,7 +155,7 @@ fn create_display(event_loop: &glutin::event_loop::EventLoop<()>) -> glium::Disp
 }
 
 fn main() {
-    color_eyre::install().unwrap();
+    color_eyre::config::HookBuilder::new().panic_section("(GUI Panicked)").install().unwrap();
 
     let (sender, recv) = mpsc::channel();
     std::thread::spawn(|| reader_thread(sender));
@@ -213,29 +212,34 @@ fn main() {
 
             egui.begin_frame(&display);
 
-            egui::CentralPanel::default().show(egui.ctx(), |ui| {
-                egui::Grid::new("base_grid")
-                    .striped(true)
-                    .spacing([40.0, 4.0])
-                    .show(ui, |ui| {
-                        draw_repr(
-                            ui,
-                            &Namespaced::new(
-                                vec!["livemod".to_owned(), "fields".to_owned()],
-                                //TODO: Optimize this
-                                state
-                                    .tracked_vars
-                                    .iter()
-                                    .map(|(k, v)| (k.to_owned(), Parameter::Namespaced(v.clone())))
-                                    .collect(),
-                            ),
-                            "".to_owned(),
-                            &mut state,
-                        )
-                    });
-            });
+            let messages = egui::CentralPanel::default()
+                .show(egui.ctx(), |ui| {
+                    egui::Grid::new("base_grid")
+                        .striped(true)
+                        .spacing([40.0, 4.0])
+                        .show(ui, |ui| {
+                            draw_repr(
+                                ui,
+                                &Namespaced::new(
+                                    vec!["livemod".to_owned(), "fields".to_owned()],
+                                    //TODO: Optimize this
+                                    state
+                                        .tracked_vars
+                                        .iter()
+                                        .map(|(k, v)| {
+                                            (k.to_owned(), Parameter::Namespaced(v.clone()))
+                                        })
+                                        .collect(),
+                                ),
+                                "".to_owned(),
+                                &mut state,
+                            )
+                        })
+                        .inner
+                })
+                .inner;
 
-            for (name, value) in state.messages.drain(..) {
+            for (name, value) in messages.into_iter() {
                 let serialized = value.serialize();
                 println!(
                     "s{};{}-{}",
@@ -283,6 +287,8 @@ fn main() {
     });
 }
 
+type Messages = Vec<(String, Parameter<Value>)>;
+
 /// Dispatch and draw the given `repr` to the given `ui`.
 ///
 /// # Parameters
@@ -290,20 +296,27 @@ fn main() {
 /// * `repr`: The `repr` to draw.
 /// * `namespace`: The namespace or name to store data under.
 /// * `state`: The currently stored data.
-fn draw_repr(ui: &mut egui::Ui, repr: &Namespaced<Repr>, namespace: String, state: &mut State) {
+fn draw_repr(
+    ui: &mut egui::Ui,
+    repr: &Namespaced<Repr>,
+    namespace: String,
+    state: &mut State,
+) -> Messages {
     if repr.name[0] == "livemod" {
         match repr.name[1].as_str() {
             "fields" => {
+                let mut msgs = Messages::default();
                 for (name, field) in &repr.parameters {
                     let field_namespace = format!("{}.{}", namespace, name);
                     let field = field.as_namespaced().unwrap();
                     ui.label(name);
-                    draw_repr(ui, field, field_namespace, state);
+                    msgs.append(&mut draw_repr(ui, field, field_namespace, state));
                     ui.end_row();
                 }
+                msgs
             }
-            "struct" => {
-                ui.collapsing(repr.parameters["name"].as_string().unwrap(), |ui| {
+            "struct" => ui
+                .collapsing(repr.parameters["name"].as_string().unwrap(), |ui| {
                     egui::Grid::new(&namespace)
                         .striped(true)
                         .spacing([40.0, 4.0])
@@ -313,10 +326,12 @@ fn draw_repr(ui: &mut egui::Ui, repr: &Namespaced<Repr>, namespace: String, stat
                                 repr.parameters["fields"].as_namespaced().unwrap(),
                                 namespace,
                                 state,
-                            );
-                        });
-                });
-            }
+                            )
+                        })
+                        .inner
+                })
+                .body_returned
+                .unwrap_or_default(),
             "vec" => {
                 ui.collapsing("Vec", |ui| {
                     egui::Grid::new(&namespace)
@@ -330,6 +345,7 @@ fn draw_repr(ui: &mut egui::Ui, repr: &Namespaced<Repr>, namespace: String, stat
                                     repr.parameters["len"].as_unsigned_int().copied().unwrap(),
                                 ),
                             );
+                            let mut msgs = Messages::default();
                             if ui
                                 .add(
                                     egui::DragValue::new(len.as_unsigned_int_mut().unwrap())
@@ -337,9 +353,7 @@ fn draw_repr(ui: &mut egui::Ui, repr: &Namespaced<Repr>, namespace: String, stat
                                 )
                                 .changed()
                             {
-                                state
-                                    .messages
-                                    .push((len_field, len.clone().try_into().unwrap()));
+                                msgs.push((len_field, len.clone().try_into().unwrap()));
                             }
                             ui.end_row();
                             for (i, field) in &repr.parameters {
@@ -350,12 +364,16 @@ fn draw_repr(ui: &mut egui::Ui, repr: &Namespaced<Repr>, namespace: String, stat
                                 let field_namespace = format!("{}.{}", namespace, i);
                                 let field = field.as_namespaced().unwrap();
                                 ui.label(format!("{}", i));
-                                draw_repr(ui, field, field_namespace, state);
+                                msgs.append(&mut draw_repr(ui, field, field_namespace, state));
                                 //TODO: Add remove button, insert button, etc.
                                 ui.end_row();
                             }
-                        });
-                });
+                            msgs
+                        })
+                        .inner
+                })
+                .body_returned
+                .unwrap_or_default()
             }
             "map" => {
                 ui.collapsing("Map", |ui| {
@@ -363,50 +381,65 @@ fn draw_repr(ui: &mut egui::Ui, repr: &Namespaced<Repr>, namespace: String, stat
                         .striped(true)
                         .spacing([40.0, 4.0])
                         .show(ui, |ui| {
-                            let key = repr.parameters["key"].as_namespaced().unwrap();
-                            for (i, (key, value)) in repr.parameters["keys"]
+                            let key_repr = repr.parameters["key"].as_namespaced().unwrap();
+                            let mut msgs = Messages::default();
+                            for (key, value) in repr.parameters["keys"]
                                 .as_namespaced()
                                 .unwrap()
                                 .parameters
                                 .iter()
-                                .map(|(i, k)| k.as_namespaced().unwrap())
+                                .map(|(i, _k)| i)
                                 .zip(
                                     repr.parameters["values"]
                                         .as_namespaced()
                                         .unwrap()
                                         .parameters
                                         .iter()
-                                        .map(|(i, v)| v.as_namespaced().unwrap()),
+                                        .map(|(_i, v)| v.as_namespaced().unwrap()),
                                 )
-                                .enumerate()
                             {
-                                let key_namespace = format!("{}.keys.{}", namespace, i);
-                                let value_namespace = format!("{}.values.{}", namespace, i);
-                                draw_repr(ui, &key, key_namespace, state);
-                                draw_repr(ui, &value, value_namespace, state);
+                                let key_namespace = format!("{}.keys.{}", namespace, key);
+                                let value_namespace = format!("{}.values.{}", namespace, key);
+                                let mut key_msgs = draw_repr(ui, &key_repr, key_namespace, state);
+                                let mut val_msgs = draw_repr(ui, &value, value_namespace, state);
+                                // Add value messages first, to allow them to update before the key changes, in case of lag.
+                                msgs.append(&mut val_msgs);
+                                msgs.append(&mut key_msgs);
                                 //TODO: Remove button, etc.
                                 ui.end_row();
                             }
                             ui.separator();
                             ui.end_row();
                             ui.label("Insert:");
-                            draw_repr(ui, &key, format!("{}.insert", namespace), state);
+                            draw_repr(ui, &key_repr, format!("{}.insert", namespace), state);
                             if ui.small_button("+").clicked() {
-                                state.messages.push((
+                                msgs.push((
                                     format!("{}", namespace),
                                     Parameter::Namespaced(Namespaced::new(
                                         vec![
                                             "livemod".to_owned(),
                                             "map".to_owned(),
-                                            "ins".to_owned(),
+                                            "insert".to_owned(),
                                         ],
-                                        todo!(),
+                                        std::iter::once((
+                                            "key".to_owned(),
+                                            construct_value(
+                                                &key_repr,
+                                                format!("{}.insert", namespace),
+                                                state,
+                                            ),
+                                        ))
+                                        .collect(),
                                     )),
                                 ));
                             }
                             ui.end_row();
-                        });
-                });
+                            msgs
+                        })
+                        .inner
+                })
+                .body_returned
+                .unwrap_or_default()
             }
             "bool" => {
                 let mut value = state
@@ -414,17 +447,13 @@ fn draw_repr(ui: &mut egui::Ui, repr: &Namespaced<Repr>, namespace: String, stat
                     .entry(namespace.clone())
                     .or_insert(AnyData::Bool(false));
                 if ui.checkbox(value.as_bool_mut().unwrap(), "").changed() {
-                    Some(
-                        state
-                            .messages
-                            .push((namespace, value.clone().try_into().unwrap())),
-                    )
+                    vec![(namespace, value.clone().try_into().unwrap())]
                 } else {
-                    None
-                };
+                    vec![]
+                }
             }
-            "trigger" => {
-                ui.button(
+            "trigger" => ui
+                .button(
                     repr.parameters
                         .get("name")
                         .and_then(|param| param.as_string().map(|s| s.as_str()))
@@ -432,15 +461,15 @@ fn draw_repr(ui: &mut egui::Ui, repr: &Namespaced<Repr>, namespace: String, stat
                 )
                 .clicked()
                 .then(|| {
-                    state.messages.push((
+                    vec![(
                         namespace,
                         Parameter::Namespaced(Namespaced::new(
                             vec!["livemod".to_owned(), "trigger".to_owned()],
                             std::iter::empty().collect(),
                         )),
-                    ));
-                });
-            }
+                    )]
+                })
+                .unwrap_or_default(),
             "string" => {
                 let value = state
                     .tracked_data
@@ -458,14 +487,10 @@ fn draw_repr(ui: &mut egui::Ui, repr: &Namespaced<Repr>, namespace: String, stat
                 }
                 .changed()
                 {
-                    Some(
-                        state
-                            .messages
-                            .push((namespace, value.clone().try_into().unwrap())),
-                    )
+                    vec![(namespace, value.clone().try_into().unwrap())]
                 } else {
-                    None
-                };
+                    vec![]
+                }
             }
             "sint" => {
                 let min = repr.parameters["min"].as_signed_int().copied().unwrap();
@@ -509,14 +534,10 @@ fn draw_repr(ui: &mut egui::Ui, repr: &Namespaced<Repr>, namespace: String, stat
                 }
                 .changed()
                 {
-                    Some(
-                        state
-                            .messages
-                            .push((namespace, value.clone().try_into().unwrap())),
-                    )
+                    vec![(namespace, value.clone().try_into().unwrap())]
                 } else {
-                    None
-                };
+                    vec![]
+                }
             }
             "uint" => {
                 let min = repr.parameters["min"].as_unsigned_int().copied().unwrap();
@@ -559,14 +580,10 @@ fn draw_repr(ui: &mut egui::Ui, repr: &Namespaced<Repr>, namespace: String, stat
                 }
                 .changed()
                 {
-                    Some(
-                        state
-                            .messages
-                            .push((namespace, value.clone().try_into().unwrap())),
-                    )
+                    vec![(namespace, value.clone().try_into().unwrap())]
                 } else {
-                    None
-                };
+                    vec![]
+                }
             }
             "float" => {
                 let min = repr.parameters["min"].as_float().copied().unwrap();
@@ -605,20 +622,68 @@ fn draw_repr(ui: &mut egui::Ui, repr: &Namespaced<Repr>, namespace: String, stat
                 }
                 .changed()
                 {
-                    Some(
-                        state
-                            .messages
-                            .push((namespace, value.clone().try_into().unwrap())),
-                    )
+                    vec![(namespace, value.clone().try_into().unwrap())]
                 } else {
-                    None
-                };
+                    vec![]
+                }
             }
             name => panic!("Unknown livemod builtin: {}", name),
         }
+    } else {
+        todo!()
     }
 }
 
+fn construct_value(
+    repr: &Namespaced<Repr>,
+    namespace: String,
+    state: &mut State,
+) -> Parameter<Value> {
+    if repr.name[0] == "livemod" {
+        match repr.name[1].as_str() {
+            "bool" => {
+                let value = state
+                    .tracked_data
+                    .entry(namespace.clone())
+                    .or_insert(AnyData::Bool(false));
+                Parameter::Bool(*value.as_bool().unwrap())
+            }
+            "sint" => {
+                let value = state
+                    .tracked_data
+                    .entry(namespace.clone())
+                    .or_insert(AnyData::SignedInt(0));
+                Parameter::SignedInt(*value.as_signed_int().unwrap())
+            }
+            "uint" => {
+                let value = state
+                    .tracked_data
+                    .entry(namespace.clone())
+                    .or_insert(AnyData::UnsignedInt(0));
+                Parameter::UnsignedInt(*value.as_unsigned_int().unwrap())
+            }
+            "float" => {
+                let value = state
+                    .tracked_data
+                    .entry(namespace.clone())
+                    .or_insert(AnyData::Float(0.0));
+                Parameter::Float(*value.as_float().unwrap())
+            }
+            "string" => {
+                let value = state
+                    .tracked_data
+                    .entry(namespace.clone())
+                    .or_insert(AnyData::String("".to_string()));
+                Parameter::String(value.as_string().unwrap().to_string())
+            }
+            name => panic!("Unknown livemod builtin: {}", name),
+        }
+    } else {
+        todo!()
+    }
+}
+
+#[derive(Debug, Clone)]
 enum Message {
     NewData(String, Namespaced<Repr>, Parameter<Value>),
     UpdateRepr(String, Namespaced<Repr>, Parameter<Value>),

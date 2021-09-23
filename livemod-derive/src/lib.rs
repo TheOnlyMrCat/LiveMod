@@ -88,6 +88,7 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
         }
         syn::Data::Enum(en) => {
             todo!();
+            //TODO: Update enum to namespaced repr
             /*
             let enum_name = ast.ident;
 

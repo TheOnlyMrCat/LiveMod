@@ -750,7 +750,7 @@ where
                     false
                 }
             } else {
-                self[dbg!(field).parse::<usize>().unwrap()].accept(field_target, value)
+                self[field.parse::<usize>().unwrap()].accept(field_target, value)
             }
         } else {
             let trigger = value.try_into_namespaced().unwrap();
@@ -815,12 +815,26 @@ where
 
 impl<K, V> LiveMod for std::collections::HashMap<K, V>
 where
-    K: LiveModCtor + Eq + Hash,
+    K: LiveModCtor + Eq + Hash + std::fmt::Debug,
     V: LiveMod + Default,
 {
     fn repr_default(&self, target: ActionTarget) -> Namespaced<Repr> {
         if let Some((field, field_target)) = target.strip_one_field() {
-            self.get(&K::from_value(Parameter::deserialize(field).unwrap()).unwrap()).unwrap().repr_default(field_target)
+            // Field will be "keys" or "values"
+            match field {
+                "keys" => {
+                    // Repr of a key will always be the same
+                    K::repr_static()
+                }
+                "values" => {
+                    if let Some((field, field_target)) = field_target.strip_one_field() {
+                        self.get(&K::from_value(Parameter::deserialize(field).unwrap()).unwrap()).unwrap().repr_default(field_target)
+                    } else {
+                        unimplemented!()
+                    }
+                }
+                _ => unimplemented!(),
+            }
         } else {
             Namespaced {
                 name: vec!["livemod".to_owned(), "map".to_owned()],
@@ -832,10 +846,9 @@ where
                             name: vec!["livemod".to_owned(), "fields".to_owned()],
                             parameters: self
                                 .iter()
-                                .enumerate()
-                                .map(|(i, (k, _v))| {
+                                .map(|(k, _v)| {
                                     (
-                                        format!("{}", i),
+                                        format!("{}", k.get_self(ActionTarget::This).serialize()),
                                         Parameter::Namespaced(k.repr_default(ActionTarget::This)),
                                     )
                                 })
@@ -849,10 +862,9 @@ where
                             name: vec!["livemod".to_owned(), "fields".to_owned()],
                             parameters: self
                                 .iter()
-                                .enumerate()
-                                .map(|(i, (_k, v))| {
+                                .map(|(k, v)| {
                                     (
-                                        format!("{}", i),
+                                        format!("{}", k.get_self(ActionTarget::This).serialize()),
                                         Parameter::Namespaced(v.repr_default(ActionTarget::This)),
                                     )
                                 })
@@ -868,16 +880,34 @@ where
 
     fn accept(&mut self, target: ActionTarget, value: Parameter<Value>) -> bool {
         if let Some((field, field_target)) = target.strip_one_field() {
-            self.get_mut(&K::from_value(Parameter::deserialize(field).unwrap()).unwrap()).unwrap().accept(field_target, value)
+            // As with repr_default, will be "keys" or "values"
+            match field {
+                "keys" => {
+                    if let Some((field, field_target)) = field_target.strip_one_field() {
+                        let (mut k, v) = self.remove_entry(&K::from_value(Parameter::deserialize(field).unwrap()).unwrap()).unwrap();
+                        k.accept(field_target, value);
+                        self.insert(k, v);
+                        true
+                    } else {
+                        unimplemented!()
+                    }
+                }
+                "values" => {
+                    if let Some((field, field_target)) = field_target.strip_one_field() {
+                        self.get_mut(&K::from_value(Parameter::deserialize(field).unwrap()).unwrap()).unwrap().accept(field_target, value)
+                    } else {
+                        unimplemented!()
+                    }
+                }
+                _ => unimplemented!(),
+            }
         } else {
             let trigger = value.try_into_namespaced().unwrap();
             if trigger.name[2] == "rm" {
-                let key = trigger.parameters["key"].clone().try_into_string().unwrap();
-                let key = K::from_value(Parameter::deserialize(&key).unwrap()).unwrap();
+                let key = K::from_value(trigger.parameters["key"].clone()).unwrap();
                 self.remove(&key);
-            } else if trigger.name[2] == "ins" {
-                let key = trigger.parameters["key"].clone().try_into_string().unwrap();
-                let key = K::from_value(Parameter::deserialize(&key).unwrap()).unwrap();
+            } else if trigger.name[2] == "insert" {
+                let key = K::from_value(trigger.parameters["key"].clone()).unwrap();
                 self.insert(key, Default::default());
             }
             true
@@ -897,11 +927,11 @@ where
                             name: vec!["livemod".to_owned(), "fields".to_owned()],
                             parameters: self
                                 .iter()
-                                .enumerate()
-                                .map(|(i, (k, _v))| {
+                                .map(|(k, _v)| {
+                                    let val = k.get_self(ActionTarget::This);
                                     (
-                                        format!("{}", i),
-                                        k.get_self(ActionTarget::This),
+                                        format!("{}", val.serialize()),
+                                        val,
                                     )
                                 })
                                 .collect(),
@@ -914,10 +944,9 @@ where
                             name: vec!["livemod".to_owned(), "fields".to_owned()],
                             parameters: self
                                 .iter()
-                                .enumerate()
-                                .map(|(i, (_k, v))| {
+                                .map(|(k, v)| {
                                     (
-                                        format!("{}", i),
+                                        format!("{}", k.get_self(ActionTarget::This).serialize()),
                                         v.get_self(ActionTarget::This),
                                     )
                                 })

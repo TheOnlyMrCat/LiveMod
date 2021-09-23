@@ -11,7 +11,7 @@ livemod_static! {
 }
 
 fn main() {
-    color_eyre::install().unwrap();
+    color_eyre::config::HookBuilder::new().panic_section("(Test Panicked)").install().unwrap();
     
     let running = AtomicBool::new(true);
     let livemod = LiveModHandle::new_gui();
