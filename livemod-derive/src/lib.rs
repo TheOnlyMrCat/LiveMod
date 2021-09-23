@@ -87,9 +87,6 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
             gen.into()
         }
         syn::Data::Enum(en) => {
-            todo!();
-            //TODO: Update enum to namespaced repr
-            /*
             let enum_name = ast.ident;
 
             let mut variant_names = vec![];
@@ -102,7 +99,7 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
             for variant in en.variants {
                 let variant_name = variant.ident;
                 let variant_string = variant_name.to_string();
-                variant_names.push(variant_name.to_string());
+                variant_names.push(variant_string.clone());
                 match variant.fields {
                     syn::Fields::Named(fields) => {
                         let FieldsDerive {
@@ -121,7 +118,15 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
                         variant_get_named_values.push(quote! { #self_pattern => match name { #(#get_named_values as &dyn ::livemod::LiveMod,)* _ => panic!("Unexpected value name!") } });
                         variant_get_named_values_mut.push(quote! { #self_pattern => match name { #(#get_named_values as &mut dyn ::livemod::LiveMod,)* _ => panic!("Unexpected value name!") } });
                         variant_defaults.push(quote! { #variant_string => Self::#variant_name { #(#idents: #default_values),* } });
-                        variant_get_selves.push(quote! { #self_pattern => ::livemod::TrackedDataValue::Enum { variant: #variant_string.to_owned(), fields: vec![#(#get_selves),*] } })
+                        variant_get_selves.push(quote! {
+                            #self_pattern => ::livemod::Namespaced::new(
+                                vec![String::from("livemod"), String::from("enum")],
+                                <_ as ::std::iter::FromIterator<_>>::from_iter(::std::array::IntoIter::new([
+                                    (String::from("name"), Parameter::String(String::from(#variant_string))),
+                                    (String::from("fields"), Parameter::Namespaced(::livemod::Namespaced::fields_value(&[#(#get_selves),*]))),
+                                ]))
+                            )
+                        });
                     }
                     syn::Fields::Unnamed(fields) => {
                         let FieldsDerive {
@@ -140,7 +145,15 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
                         variant_get_named_values.push(quote! { #self_pattern => match name { #(#get_named_values as &dyn ::livemod::LiveMod,)* _ => panic!("Unexpected value name!") } });
                         variant_get_named_values_mut.push(quote! { #self_pattern => match name { #(#get_named_values as &mut dyn ::livemod::LiveMod,)* _ => panic!("Unexpected value name!") } });
                         variant_defaults.push(quote! { #variant_string => Self::#variant_name ( #(#default_values),* ) });
-                        variant_get_selves.push(quote! { #self_pattern => ::livemod::TrackedDataValue::Enum { variant: #variant_string.to_owned(), fields: vec![#(#get_selves),*] } })
+                        variant_get_selves.push(quote! {
+                            #self_pattern => ::livemod::Namespaced::new(
+                                vec![String::from("livemod"), String::from("enum")],
+                                <_ as ::std::iter::FromIterator<_>>::from_iter(::std::array::IntoIter::new([
+                                    (String::from("name"), Parameter::String(String::from(#variant_string))),
+                                    (String::from("fields"), Parameter::Namespaced(::livemod::Namespaced::fields_value(&[#(#get_selves),*]))),
+                                ]))
+                            )
+                        });
                     }
                     syn::Fields::Unit => {
                         variant_fields.push(quote! { Self::#variant_name => vec![] });
@@ -151,7 +164,7 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
                             quote! { Self::#variant_name => panic!("Unexpected value name!") },
                         );
                         variant_defaults.push(quote! { #variant_string => Self::#variant_name });
-                        variant_get_selves.push(quote! { Self::#variant_name => ::livemod::TrackedDataValue::Enum { variant: #variant_string.to_owned(), fields: vec![] } })
+                        variant_get_selves.push(quote! { Self::#variant_name => ::livemod::Namespaced::new(vec![String::from("livemod"), String::from("enum")], <_ as ::std::iter::FromIterator<_>>::from_iter(::std::array::IntoIter::new([(String::from("name"), Parameter::String(String::from(#variant_string)))]))) });
                     }
                 }
             }
@@ -159,32 +172,56 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
             let gen = quote! {
                 #[automatically_derived]
                 impl ::livemod::LiveMod for #enum_name {
-                    fn repr_default(&self, target: ActionTarget) -> ::livemod::TrackedDataRepr {
+                    fn repr_default(&self, target: ::livemod::ActionTarget) -> ::livemod::Namespaced<::livemod::Repr> {
                         if let Some((name, field_target)) = target.strip_one_field() {
                             match self {
                                 #(#variant_get_named_values ,)*
                             }.repr_default(field_target)
                         } else {
-                            ::livemod::TrackedDataRepr::Enum {
-                                name: String::from(stringify!(#enum_name)),
-                                variants: vec![
-                                    #(#variant_names.to_owned()),*
+                            ::livemod::Namespaced::new(
+                                vec![
+                                    String::from("livemod"),
+                                    String::from("enum"),
                                 ],
-                                fields: match self {
-                                    #(#variant_fields ,)*
-                                },
-                                triggers: vec![]
-                            }
+                                <_ as ::std::iter::FromIterator<_>>::from_iter(::std::array::IntoIter::new([
+                                    (String::from("name"), Parameter::String(String::from(stringify!(#enum_name)))),
+                                    (
+                                        String::from("variants"),
+                                        Parameter::Namespaced(Namespaced::new(
+                                            vec![String::from("livemod"), String::from("variants")],
+                                            <_ as ::std::iter::FromIterator<_>>::from_iter(
+                                                ::std::array::IntoIter::new([
+                                                    #(#variant_names),*
+                                                ])
+                                                .enumerate()
+                                                .map(|(i, variant_name)| {
+                                                    (i.to_string(), Parameter::String(variant_name.to_string()))
+                                                })
+                                            ),
+                                        )),
+                                    ),
+                                    (
+                                        String::from("current"),
+                                        Parameter::Namespaced(Namespaced::new(
+                                            vec![String::from("livemod"), String::from("fields")],
+                                            //FIXME: If anybody can help me with the unneccesary heap allocation in here, please do so. I'm sick of macros.
+                                            <_ as ::std::iter::FromIterator<_>>::from_iter(match self {
+                                                #(#variant_fields ,)*
+                                            }.into_iter().map(|(s, n)| (s, ::livemod::Parameter::Namespaced(n))))
+                                        )),
+                                    )
+                                ]))
+                            )
                         }
                     }
 
-                    fn trigger(&mut self, target: ActionTarget, trigger: ::livemod::Trigger) -> bool {
+                    fn accept(&mut self, target: ::livemod::ActionTarget, value: ::livemod::Parameter<::livemod::Value>) -> bool {
                         if let Some((name, field_target)) = target.strip_one_field() {
                             match self {
                                 #(#variant_get_named_values_mut ,)*
-                            }.trigger(field_target, trigger)
+                            }.accept(field_target, value)
                         } else {
-                            let variant_name = trigger.try_into_set().unwrap().try_into_enum_variant().unwrap();
+                            let variant_name = value.as_namespaced().unwrap().parameters["name"].as_string().unwrap();
                             *self = match variant_name.as_str() {
                                 #(#variant_defaults ,)*
                                 name => panic!("Unknown variant name: {}", name)
@@ -193,21 +230,20 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
                         }
                     }
 
-                    fn get_self(&self, target: ActionTarget) -> ::livemod::TrackedDataValue {
+                    fn get_self(&self, target: ActionTarget) -> ::livemod::Parameter<::livemod::Value> {
                         if let Some((name, field_target)) = target.strip_one_field() {
                             match self {
                                 #(#variant_get_named_values ,)*
                             }.get_self(field_target)
                         } else {
-                            match self {
+                            ::livemod::Parameter::Namespaced(match self {
                                 #(#variant_get_selves ,)*
-                            }
+                            })
                         }
                     }
                 }
             };
             gen.into()
-            */
         }
         syn::Data::Union(_) => {
             let gen = quote! {

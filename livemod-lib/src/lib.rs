@@ -5,7 +5,9 @@ use std::hash::Hash;
 use std::iter::FromIterator;
 use std::ops::RangeInclusive;
 
+pub use hashlink;
 use hashlink::LinkedHashMap;
+
 
 #[cfg(feature = "livemod-derive")]
 pub use livemod_derive::LiveMod;
@@ -296,12 +298,36 @@ impl Namespaced<Repr> {
             _marker: std::marker::PhantomData,
         }
     }
+
+    pub fn fields_repr(fields: &[(String, Parameter<Repr>)]) -> Namespaced<Repr> {
+        Namespaced {
+            name: vec!["livemod".to_owned(), "fields".to_owned()],
+            parameters: LinkedHashMap::from_iter(
+                fields
+                    .iter()
+                    .map(|(name, field)| (name.to_owned(), field.clone())),
+            ),
+            _marker: std::marker::PhantomData,
+        }
+    }
 }
 
 impl Namespaced<Value> {
     pub fn basic_structure_value(fields: &[(String, Parameter<Value>)]) -> Namespaced<Value> {
         Namespaced {
             name: vec!["livemod".to_owned(), "struct".to_owned()],
+            parameters: LinkedHashMap::from_iter(
+                fields
+                    .iter()
+                    .map(|(name, field)| (name.to_owned(), field.clone())),
+            ),
+            _marker: std::marker::PhantomData,
+        }
+    }
+
+    pub fn fields_value(fields: &[(String, Parameter<Value>)]) -> Namespaced<Value> {
+        Namespaced {
+            name: vec!["livemod".to_owned(), "fields".to_owned()],
             parameters: LinkedHashMap::from_iter(
                 fields
                     .iter()
@@ -835,27 +861,6 @@ where
         }
     }
 }
-
-/*
-impl<T> LiveModCtor for Vec<T>
-where
-    T: LiveModCtor + Default,
-{
-    fn from_value(value: Parameter<Value>) -> Option<Self> {
-        value.try_into_namespaced().ok().and_then(|ns| {
-            if ns.name[2] == "vec" {
-                let mut vec = Vec::new();
-                for (_, v) in ns.parameters.into_iter() {
-                    vec.push(T::from_value(v).unwrap());
-                }
-                Some(vec)
-            } else {
-                None
-            }
-        })
-    }
-}
-*/
 
 impl<K, V> LiveMod for std::collections::HashMap<K, V>
 where

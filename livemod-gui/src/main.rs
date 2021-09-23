@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::io::{BufRead, BufReader, Read};
 use std::sync::mpsc::{self, Sender};
@@ -20,7 +20,6 @@ enum AnyData {
     Float(f64),
     Bool(bool),
     String(String),
-    Map(HashMap<String, AnyData>),
 }
 
 impl AnyData {
@@ -103,36 +102,17 @@ impl AnyData {
             None
         }
     }
-
-    fn as_map(&self) -> Option<&HashMap<String, AnyData>> {
-        if let Self::Map(v) = self {
-            Some(v)
-        } else {
-            None
-        }
-    }
-
-    fn as_map_mut(&mut self) -> Option<&mut HashMap<String, AnyData>> {
-        if let Self::Map(v) = self {
-            Some(v)
-        } else {
-            None
-        }
-    }
 }
 
-impl TryFrom<AnyData> for Parameter<Value> {
-    type Error = ();
-
-    fn try_from(data: AnyData) -> Result<Self, Self::Error> {
-        Ok(match data {
+impl From<AnyData> for Parameter<Value> {
+    fn from(data: AnyData) -> Self {
+        match data {
             AnyData::SignedInt(v) => Parameter::SignedInt(v),
             AnyData::UnsignedInt(v) => Parameter::UnsignedInt(v),
             AnyData::Float(v) => Parameter::Float(v),
             AnyData::Bool(v) => Parameter::Bool(v),
             AnyData::String(v) => Parameter::String(v),
-            AnyData::Map(v) => return Err(()),
-        })
+        }
     }
 }
 
@@ -442,7 +422,7 @@ fn draw_repr(
                 .unwrap_or_default()
             }
             "bool" => {
-                let mut value = state
+                let value = state
                     .tracked_data
                     .entry(namespace.clone())
                     .or_insert(AnyData::Bool(false));

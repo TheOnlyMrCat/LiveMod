@@ -147,17 +147,15 @@ impl Default for DerivedData {
 #[derive(Default, LiveMod)]
 struct DerivedTuple(u32, u64);
 
-/*
 #[derive(Clone, Debug, PartialEq, LiveMod)]
 #[allow(clippy::enum_variant_names)]
 enum DerivedEnum {
     UnitVariant,
     TupleVariant(f32, #[livemod(repr = Multiline)] String),
     StructVariant {
-        #[livemod(default = 69)]
+        #[livemod(default = 42)]
         number: u32,
         #[livemod(repr = Slider(0.0..=5.0))]
         float_slider: f32,
     },
 }
-*/
