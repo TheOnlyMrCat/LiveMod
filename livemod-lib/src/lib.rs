@@ -458,7 +458,7 @@ impl ActionTarget<'_, '_> {
 }
 
 /// Data which can be registered with a [`LiveModHandle`]
-pub trait LiveMod {
+pub trait LiveMod: Send {
     /// The default representation of the data
     fn repr_default(&self, target: ActionTarget) -> Namespaced<Repr>;
     /// Return the current value of this data, whether it is a struct or a value
@@ -706,6 +706,50 @@ impl LiveModCtor for String {
 
     fn from_value(value: Parameter<Value>) -> Option<Self> {
         value.try_into_string().ok()
+    }
+}
+
+impl<T> LiveMod for Box<T>
+where
+    T: LiveMod,
+{
+    fn repr_default(&self, target: ActionTarget) -> Namespaced<Repr> {
+        (**self).repr_default(target)
+    }
+
+    fn accept(&mut self, target: ActionTarget, value: Parameter<Value>) -> bool {
+        (**self).accept(target, value)
+    }
+
+    fn get_self(&self, target: ActionTarget) -> Parameter<Value> {
+        (**self).get_self(target)
+    }
+}
+
+impl<T> LiveModCtor for Box<T>
+where
+    T: LiveModCtor,
+{
+    fn repr_static() -> Namespaced<Repr> {
+        T::repr_static()
+    }
+
+    fn from_value(value: Parameter<Value>) -> Option<Self> {
+        T::from_value(value).map(Box::new)
+    }
+}
+
+impl LiveMod for Box<dyn LiveMod> {
+    fn repr_default(&self, target: ActionTarget) -> Namespaced<Repr> {
+        (**self).repr_default(target)
+    }
+
+    fn accept(&mut self, target: ActionTarget, value: Parameter<Value>) -> bool {
+        (**self).accept(target, value)
+    }
+
+    fn get_self(&self, target: ActionTarget) -> Parameter<Value> {
+        (**self).get_self(target)
     }
 }
 
@@ -961,18 +1005,18 @@ where
     }
 }
 
-pub struct TriggerFn<A, F: FnMut(&mut A)> {
+pub struct TriggerFn<A: Send, F: FnMut(&mut A) + Send> {
     arg: A,
     func: F,
 }
 
-impl<A, F: FnMut(&mut A)> TriggerFn<A, F> {
+impl<A: Send, F: FnMut(&mut A) + Send> TriggerFn<A, F> {
     pub fn new(arg: A, func: F) -> TriggerFn<A, F> {
         TriggerFn { arg, func }
     }
 }
 
-impl<A, F: FnMut(&mut A)> LiveMod for TriggerFn<A, F> {
+impl<A: Send, F: FnMut(&mut A) + Send> LiveMod for TriggerFn<A, F> {
     fn repr_default(&self, target: ActionTarget) -> Namespaced<Repr> {
         debug_assert!(target.is_this());
         Namespaced {
