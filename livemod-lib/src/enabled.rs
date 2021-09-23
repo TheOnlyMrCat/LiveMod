@@ -341,8 +341,8 @@ fn input_thread(
             }
         }
     }
-    // Tell the child we're finished, so it can tell the output thread
-    write!(input, "\0").unwrap();
+
+    // Stdin is closed on drop.
 }
 
 fn output_thread(
@@ -356,17 +356,13 @@ fn output_thread(
     loop {
         let message_type = {
             let mut message_type = [0u8];
-            reader.read_exact(&mut message_type).unwrap();
-            message_type[0]
+            match reader.read_exact(&mut message_type) {
+                Ok(()) => message_type[0],
+                Err(_) => break,
+            }
         };
 
         match message_type {
-            b'\0' => {
-                // The LiveModHandle which spawned this thread has
-                // been destroyed, the child informed of it, and the
-                // child terminated, so quit the loop now.
-                break;
-            }
             b's' => {
                 // Data is to be changed
                 let name = {

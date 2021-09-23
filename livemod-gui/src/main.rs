@@ -705,15 +705,13 @@ fn reader_thread(sender: Sender<Message>) {
     loop {
         let message_type = {
             let mut message_type = [0u8];
-            reader.read_exact(&mut message_type).unwrap();
-            message_type[0]
+            match reader.read_exact(&mut message_type) {
+                Ok(()) => message_type[0],
+                Err(_) => break,
+            }
         };
 
         match message_type {
-            b'\0' => {
-                sender.send(Message::Quit).unwrap();
-                break; // And exit the thread
-            }
             b'n' => {
                 let name = {
                     let mut name = Vec::new();
@@ -816,4 +814,6 @@ fn reader_thread(sender: Sender<Message>) {
             _ => {}
         }
     }
+
+    sender.send(Message::Quit).unwrap()
 }

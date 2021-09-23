@@ -81,6 +81,7 @@ fn main() {
             }
         }
     }
+    panic!("Intentional crash to make sure the gui exits even in abnormal conditions");
 }
 
 struct Data {
