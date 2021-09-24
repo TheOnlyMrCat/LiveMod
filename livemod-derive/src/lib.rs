@@ -122,8 +122,8 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
                             #self_pattern => ::livemod::Namespaced::new(
                                 vec![String::from("livemod"), String::from("enum")],
                                 <_ as ::std::iter::FromIterator<_>>::from_iter(::std::array::IntoIter::new([
-                                    (String::from("name"), Parameter::String(String::from(#variant_string))),
-                                    (String::from("fields"), Parameter::Namespaced(::livemod::Namespaced::fields_value(&[#(#get_selves),*]))),
+                                    (String::from("variant"), Parameter::String(String::from(#variant_string))),
+                                    (String::from("current"), Parameter::Namespaced(::livemod::Namespaced::fields_value(&[#(#get_selves),*]))),
                                 ]))
                             )
                         });
@@ -149,8 +149,8 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
                             #self_pattern => ::livemod::Namespaced::new(
                                 vec![String::from("livemod"), String::from("enum")],
                                 <_ as ::std::iter::FromIterator<_>>::from_iter(::std::array::IntoIter::new([
-                                    (String::from("name"), Parameter::String(String::from(#variant_string))),
-                                    (String::from("fields"), Parameter::Namespaced(::livemod::Namespaced::fields_value(&[#(#get_selves),*]))),
+                                    (String::from("variant"), Parameter::String(String::from(#variant_string))),
+                                    (String::from("current"), Parameter::Namespaced(::livemod::Namespaced::fields_value(&[#(#get_selves),*]))),
                                 ]))
                             )
                         });
@@ -164,7 +164,7 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
                             quote! { Self::#variant_name => panic!("Unexpected value name!") },
                         );
                         variant_defaults.push(quote! { #variant_string => Self::#variant_name });
-                        variant_get_selves.push(quote! { Self::#variant_name => ::livemod::Namespaced::new(vec![String::from("livemod"), String::from("enum")], <_ as ::std::iter::FromIterator<_>>::from_iter(::std::array::IntoIter::new([(String::from("name"), Parameter::String(String::from(#variant_string)))]))) });
+                        variant_get_selves.push(quote! { Self::#variant_name => ::livemod::Namespaced::new(vec![String::from("livemod"), String::from("enum")], <_ as ::std::iter::FromIterator<_>>::from_iter(::std::array::IntoIter::new([(String::from("variant"), Parameter::String(String::from(#variant_string)))]))) });
                     }
                 }
             }
@@ -217,16 +217,24 @@ pub fn livemod_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
 
                     fn accept(&mut self, target: ::livemod::ActionTarget, value: ::livemod::Parameter<::livemod::Value>) -> bool {
                         if let Some((name, field_target)) = target.strip_one_field() {
-                            match self {
-                                #(#variant_get_named_values_mut ,)*
-                            }.accept(field_target, value)
+                            if name == "variant" {
+                                let variant_name = value.as_string().unwrap();
+                                *self = match variant_name.as_str() {
+                                    #(#variant_defaults ,)*
+                                    name => panic!("Unknown variant name: {}", name)
+                                };
+                                true
+                            } else {
+                                if let Some((name, field_target)) = field_target.strip_one_field() {
+                                    match self {
+                                        #(#variant_get_named_values_mut ,)*
+                                    }.accept(field_target, value)
+                                } else {
+                                    unimplemented!()
+                                }
+                            }
                         } else {
-                            let variant_name = value.as_namespaced().unwrap().parameters["name"].as_string().unwrap();
-                            *self = match variant_name.as_str() {
-                                #(#variant_defaults ,)*
-                                name => panic!("Unknown variant name: {}", name)
-                            };
-                            true
+                            unimplemented!()
                         }
                     }
 

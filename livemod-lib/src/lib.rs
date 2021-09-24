@@ -8,7 +8,6 @@ use std::ops::RangeInclusive;
 pub use hashlink;
 use hashlink::LinkedHashMap;
 
-
 #[cfg(feature = "livemod-derive")]
 pub use livemod_derive::LiveMod;
 
@@ -495,7 +494,9 @@ pub trait LiveMod: Send {
 
 pub trait LiveModCtor: LiveMod {
     fn repr_static() -> Namespaced<Repr>;
-    fn from_value(value: Parameter<Value>) -> Option<Self> where Self: Sized;
+    fn from_value(value: Parameter<Value>) -> Option<Self>
+    where
+        Self: Sized;
 }
 
 pub trait LiveModRepr<T> {
@@ -877,7 +878,9 @@ where
                 }
                 "values" => {
                     if let Some((field, field_target)) = field_target.strip_one_field() {
-                        self.get(&K::from_value(Parameter::deserialize(field).unwrap()).unwrap()).unwrap().repr_default(field_target)
+                        self.get(&K::from_value(Parameter::deserialize(field).unwrap()).unwrap())
+                            .unwrap()
+                            .repr_default(field_target)
                     } else {
                         unimplemented!()
                     }
@@ -903,7 +906,7 @@ where
                                 })
                                 .collect(),
                             _marker: std::marker::PhantomData,
-                        })
+                        }),
                     ),
                     (
                         "values".to_owned(),
@@ -919,9 +922,10 @@ where
                                 })
                                 .collect(),
                             _marker: std::marker::PhantomData,
-                        })
-                    )
-                ]).collect(),
+                        }),
+                    ),
+                ])
+                .collect(),
                 _marker: std::marker::PhantomData,
             }
         }
@@ -933,7 +937,11 @@ where
             match field {
                 "keys" => {
                     if let Some((field, field_target)) = field_target.strip_one_field() {
-                        let (mut k, v) = self.remove_entry(&K::from_value(Parameter::deserialize(field).unwrap()).unwrap()).unwrap();
+                        let (mut k, v) = self
+                            .remove_entry(
+                                &K::from_value(Parameter::deserialize(field).unwrap()).unwrap(),
+                            )
+                            .unwrap();
                         k.accept(field_target, value);
                         self.insert(k, v);
                         true
@@ -943,7 +951,11 @@ where
                 }
                 "values" => {
                     if let Some((field, field_target)) = field_target.strip_one_field() {
-                        self.get_mut(&K::from_value(Parameter::deserialize(field).unwrap()).unwrap()).unwrap().accept(field_target, value)
+                        self.get_mut(
+                            &K::from_value(Parameter::deserialize(field).unwrap()).unwrap(),
+                        )
+                        .unwrap()
+                        .accept(field_target, value)
                     } else {
                         unimplemented!()
                     }
@@ -965,7 +977,9 @@ where
 
     fn get_self(&self, target: ActionTarget) -> Parameter<Value> {
         if let Some((field, field_target)) = target.strip_one_field() {
-            self.get(&K::from_value(Parameter::deserialize(field).unwrap()).unwrap()).unwrap().get_self(field_target)
+            self.get(&K::from_value(Parameter::deserialize(field).unwrap()).unwrap())
+                .unwrap()
+                .get_self(field_target)
         } else {
             Parameter::Namespaced(Namespaced {
                 name: vec!["livemod".to_owned(), "map".to_owned()],
@@ -978,14 +992,11 @@ where
                                 .iter()
                                 .map(|(k, _v)| {
                                     let val = k.get_self(ActionTarget::This);
-                                    (
-                                        format!("{}", val.serialize()),
-                                        val,
-                                    )
+                                    (format!("{}", val.serialize()), val)
                                 })
                                 .collect(),
                             _marker: std::marker::PhantomData,
-                        })
+                        }),
                     ),
                     (
                         "values".to_owned(),
@@ -1001,9 +1012,10 @@ where
                                 })
                                 .collect(),
                             _marker: std::marker::PhantomData,
-                        })
-                    )
-                ]).collect(),
+                        }),
+                    ),
+                ])
+                .collect(),
                 _marker: std::marker::PhantomData,
             })
         }

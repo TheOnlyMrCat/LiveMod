@@ -135,7 +135,10 @@ fn create_display(event_loop: &glutin::event_loop::EventLoop<()>) -> glium::Disp
 }
 
 fn main() {
-    color_eyre::config::HookBuilder::new().panic_section("(GUI Panicked)").install().unwrap();
+    color_eyre::config::HookBuilder::new()
+        .panic_section("(GUI Panicked)")
+        .install()
+        .unwrap();
 
     let (sender, recv) = mpsc::channel();
     std::thread::spawn(|| reader_thread(sender));
@@ -312,6 +315,63 @@ fn draw_repr(
                 })
                 .body_returned
                 .unwrap_or_default(),
+            "enum" => ui
+                .collapsing(repr.parameters["name"].as_string().unwrap(), |ui| {
+                    egui::Grid::new(&namespace)
+                        .striped(true)
+                        .spacing([40.0, 4.0])
+                        .show(ui, |ui| {
+                            let mut msgs = Messages::default();
+                            msgs.append(&mut draw_repr(
+                                ui,
+                                repr.parameters["variants"].as_namespaced().unwrap(),
+                                format!("{}.variant", namespace),
+                                state,
+                            ));
+                            msgs.append(&mut draw_repr(
+                                ui,
+                                repr.parameters["current"].as_namespaced().unwrap(),
+                                format!("{}.current", namespace),
+                                state,
+                            ));
+                            msgs
+                        })
+                        .inner
+                })
+                .body_returned
+                .unwrap_or_default(),
+            "variants" => {
+                let selected_variant = state
+                    .tracked_data
+                    .entry(namespace.clone())
+                    .or_insert(AnyData::String(String::new()))
+                    .as_string_mut()
+                    .unwrap();
+                let mut changed = false;
+                egui::ComboBox::from_id_source(&namespace)
+                    .selected_text(selected_variant.clone())
+                    .show_ui(ui, |ui| {
+                        for (i, variant) in &repr.parameters {
+                            let variant = variant.as_string().unwrap();
+                            changed |= ui
+                                .selectable_value(
+                                    selected_variant,
+                                    variant.clone(),
+                                    variant.clone(),
+                                )
+                                .clicked();
+                        }
+                    });
+                ui.end_row();
+                if changed {
+                    vec![(
+                        namespace.clone(),
+                        state.tracked_data[&namespace].clone().into(),
+                    )]
+                } else {
+                    vec![]
+                }
+            }
             "vec" => {
                 ui.collapsing("Vec", |ui| {
                     egui::Grid::new(&namespace)

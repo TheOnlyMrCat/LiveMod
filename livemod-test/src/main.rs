@@ -1,4 +1,7 @@
-use std::{collections::HashMap, sync::atomic::{AtomicBool, Ordering}};
+use std::{
+    collections::HashMap,
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 use livemod::{
     livemod_static, ActionTarget, LiveMod, LiveModHandle, Multiline, Namespaced, Parameter, Repr,
@@ -11,8 +14,11 @@ livemod_static! {
 }
 
 fn main() {
-    color_eyre::config::HookBuilder::new().panic_section("(Test Panicked)").install().unwrap();
-    
+    color_eyre::config::HookBuilder::new()
+        .panic_section("(Test Panicked)")
+        .install()
+        .unwrap();
+
     let running = AtomicBool::new(true);
     let livemod = LiveModHandle::new_gui();
 
@@ -20,13 +26,13 @@ fn main() {
     livemod.track_variable("Non-derived", &NON_DERIVED);
     let mut derived = livemod.create_variable("Derived", DerivedData::default());
     let _derived_tuple_struct = livemod.create_variable("Tuple struct", DerivedTuple::default());
-    // let derived_enum = livemod.create_variable(
-    //     "Derived enum",
-    //     DerivedEnum::StructVariant {
-    //         number: 32,
-    //         float_slider: 5.3,
-    //     },
-    // );
+    let derived_enum = livemod.create_variable(
+        "Derived enum",
+        DerivedEnum::StructVariant {
+            number: 32,
+            float_slider: 5.3,
+        },
+    );
     let mut can_remove = Some(livemod.create_variable("Remove me", false));
     let _vector = livemod.create_variable("Vector", vec![6.4, 8.2]);
     let _map = livemod.create_variable("Map", HashMap::<String, u32>::new());
@@ -41,16 +47,16 @@ fn main() {
     let mut prev_float = *STRAIGHT_VALUE.lock();
     let mut prev_nonderived = NON_DERIVED.lock().value;
     let mut prev_derived = derived.lock().clone();
-    // let mut prev_enum = derived_enum.lock().clone();
+    let mut prev_enum = derived_enum.lock().clone();
     println!("Float: {}", prev_float);
     println!("Non-derived: {}", prev_nonderived);
     println!("Derived: {:?}", prev_derived);
-    // println!("Enum: {:?}", prev_enum);
+    println!("Enum: {:?}", prev_enum);
     while running.load(Ordering::Relaxed) {
         let cur_float = *STRAIGHT_VALUE.lock();
         let cur_nonderived = NON_DERIVED.lock().value;
         let mut cur_derived = derived.lock_mut();
-        // let cur_enum = derived_enum.lock();
+        let cur_enum = derived_enum.lock();
         #[allow(clippy::float_cmp)]
         if cur_float != prev_float {
             println!("Float: {}", cur_float);
@@ -68,10 +74,10 @@ fn main() {
                 cur_derived.floating_point = 3.2;
             }
         }
-        // if *cur_enum != prev_enum {
-        //     println!("Enum: {:?}", *cur_enum);
-        //     prev_enum = cur_enum.clone();
-        // }
+        if *cur_enum != prev_enum {
+            println!("Enum: {:?}", *cur_enum);
+            prev_enum = cur_enum.clone();
+        }
         if let Some(r) = can_remove {
             if *r.lock() {
                 can_remove = None;
