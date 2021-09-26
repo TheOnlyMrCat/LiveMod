@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::convert::{TryFrom, TryInto};
+use std::convert::{TryInto};
 use std::io::{BufRead, BufReader, Read};
 use std::sync::mpsc::{self, Sender};
 
@@ -351,7 +351,7 @@ fn draw_repr(
                 egui::ComboBox::from_id_source(&namespace)
                     .selected_text(selected_variant.clone())
                     .show_ui(ui, |ui| {
-                        for (i, variant) in &repr.parameters {
+                        for (_i, variant) in &repr.parameters {
                             let variant = variant.as_string().unwrap();
                             changed |= ui
                                 .selectable_value(
@@ -440,8 +440,8 @@ fn draw_repr(
                             {
                                 let key_namespace = format!("{}.keys.{}", namespace, key);
                                 let value_namespace = format!("{}.values.{}", namespace, key);
-                                let mut key_msgs = draw_repr(ui, &key_repr, key_namespace, state);
-                                let mut val_msgs = draw_repr(ui, &value, value_namespace, state);
+                                let mut key_msgs = draw_repr(ui, key_repr, key_namespace, state);
+                                let mut val_msgs = draw_repr(ui, value, value_namespace, state);
                                 // Add value messages first, to allow them to update before the key changes, in case of lag.
                                 msgs.append(&mut val_msgs);
                                 msgs.append(&mut key_msgs);
@@ -451,10 +451,10 @@ fn draw_repr(
                             ui.separator();
                             ui.end_row();
                             ui.label("Insert:");
-                            draw_repr(ui, &key_repr, format!("{}.insert", namespace), state);
+                            draw_repr(ui, key_repr, format!("{}.insert", namespace), state);
                             if ui.small_button("+").clicked() {
                                 msgs.push((
-                                    format!("{}", namespace),
+                                    namespace.to_string(),
                                     Parameter::Namespaced(Namespaced::new(
                                         vec![
                                             "livemod".to_owned(),
@@ -464,7 +464,7 @@ fn draw_repr(
                                         std::iter::once((
                                             "key".to_owned(),
                                             construct_value(
-                                                &key_repr,
+                                                key_repr,
                                                 format!("{}.insert", namespace),
                                                 state,
                                             ),
@@ -684,35 +684,35 @@ fn construct_value(
             "bool" => {
                 let value = state
                     .tracked_data
-                    .entry(namespace.clone())
+                    .entry(namespace)
                     .or_insert(AnyData::Bool(false));
                 Parameter::Bool(*value.as_bool().unwrap())
             }
             "sint" => {
                 let value = state
                     .tracked_data
-                    .entry(namespace.clone())
+                    .entry(namespace)
                     .or_insert(AnyData::SignedInt(0));
                 Parameter::SignedInt(*value.as_signed_int().unwrap())
             }
             "uint" => {
                 let value = state
                     .tracked_data
-                    .entry(namespace.clone())
+                    .entry(namespace)
                     .or_insert(AnyData::UnsignedInt(0));
                 Parameter::UnsignedInt(*value.as_unsigned_int().unwrap())
             }
             "float" => {
                 let value = state
                     .tracked_data
-                    .entry(namespace.clone())
+                    .entry(namespace)
                     .or_insert(AnyData::Float(0.0));
                 Parameter::Float(*value.as_float().unwrap())
             }
             "string" => {
                 let value = state
                     .tracked_data
-                    .entry(namespace.clone())
+                    .entry(namespace)
                     .or_insert(AnyData::String("".to_string()));
                 Parameter::String(value.as_string().unwrap().to_string())
             }
@@ -769,7 +769,7 @@ fn reader_thread(sender: Sender<Message>) {
                 let repr = {
                     let mut repr = vec![0u8; len_repr];
                     reader.read_exact(&mut repr).unwrap();
-                    Namespaced::deserialize(std::str::from_utf8(&repr).unwrap()).unwrap()
+                    Namespaced::deserialize(std::str::from_utf8(&repr).unwrap())
                 };
                 reader.fill_buf().unwrap();
                 reader.consume(1); // Consume ';' delimiter
@@ -783,7 +783,7 @@ fn reader_thread(sender: Sender<Message>) {
                 let value = {
                     let mut value = vec![0u8; len_value];
                     reader.read_exact(&mut value).unwrap();
-                    Parameter::deserialize(std::str::from_utf8(&value).unwrap()).unwrap()
+                    Parameter::deserialize(std::str::from_utf8(&value).unwrap())
                 };
                 sender.send(Message::NewData(name, repr, value)).unwrap();
             }
@@ -804,7 +804,7 @@ fn reader_thread(sender: Sender<Message>) {
                 let value = {
                     let mut value = vec![0u8; len_value];
                     reader.read_exact(&mut value).unwrap();
-                    Parameter::deserialize(std::str::from_utf8(&value).unwrap()).unwrap()
+                    Parameter::deserialize(std::str::from_utf8(&value).unwrap())
                 };
                 sender.send(Message::UpdateData(name, value)).unwrap();
             }
@@ -825,7 +825,7 @@ fn reader_thread(sender: Sender<Message>) {
                 let repr = {
                     let mut repr = vec![0u8; len_repr];
                     reader.read_exact(&mut repr).unwrap();
-                    Namespaced::deserialize(std::str::from_utf8(&repr).unwrap()).unwrap()
+                    Namespaced::deserialize(std::str::from_utf8(&repr).unwrap())
                 };
                 reader.fill_buf().unwrap();
                 reader.consume(1); // Consume ';' delimiter
@@ -839,7 +839,7 @@ fn reader_thread(sender: Sender<Message>) {
                 let value = {
                     let mut value = vec![0u8; len_value];
                     reader.read_exact(&mut value).unwrap();
-                    Parameter::deserialize(std::str::from_utf8(&value).unwrap()).unwrap()
+                    Parameter::deserialize(std::str::from_utf8(&value).unwrap())
                 };
                 sender.send(Message::UpdateRepr(name, repr, value)).unwrap();
             }

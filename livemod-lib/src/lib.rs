@@ -98,20 +98,20 @@ impl<T> Parameter<T> {
             Parameter::Bool(true) => "t".to_owned(),
             Parameter::Bool(false) => "f".to_owned(),
             Parameter::String(s) => format!("\"{}\"", s),
-            Parameter::Namespaced(n) => format!("{}", n.serialize()),
+            Parameter::Namespaced(n) => n.serialize(),
         }
     }
 
-    pub fn deserialize(s: &str) -> Result<Parameter<T>, ()> {
+    pub fn deserialize(s: &str) -> Parameter<T> {
         //TODO: Should it be a result?
         match s.bytes().next().unwrap() {
-            b'-' | b'+' => Ok(Parameter::SignedInt(s.parse().unwrap())),
-            b'd' => Ok(Parameter::Float(s[1..].parse().unwrap())),
-            c if c.is_ascii_digit() => Ok(Parameter::UnsignedInt(s.parse().unwrap())),
-            b't' => Ok(Parameter::Bool(true)),
-            b'f' => Ok(Parameter::Bool(false)),
-            b'\"' => Ok(Parameter::String(s[1..s.len() - 1].to_owned())),
-            _ => Ok(Parameter::Namespaced(Namespaced::deserialize(&s)?)),
+            b'-' | b'+' => Parameter::SignedInt(s.parse().unwrap()),
+            b'd' => Parameter::Float(s[1..].parse().unwrap()),
+            c if c.is_ascii_digit() => Parameter::UnsignedInt(s.parse().unwrap()),
+            b't' => Parameter::Bool(true),
+            b'f' => Parameter::Bool(false),
+            b'\"' => Parameter::String(s[1..s.len() - 1].to_owned()),
+            _ => Parameter::Namespaced(Namespaced::deserialize(s)),
         }
     }
 
@@ -237,11 +237,11 @@ impl<T> Namespaced<T> {
             s.push_str(&v.serialize());
             s.push(',');
         }
-        s.push_str("}");
+        s.push('}');
         s
     }
 
-    pub fn deserialize(s: &str) -> Result<Namespaced<T>, ()> {
+    pub fn deserialize(s: &str) -> Namespaced<T> {
         let (name, params) = s.split_once('{').unwrap(); // Rust 1.52... Should I support earlier?
         let name = name.split(':').map(|s| s.trim().to_owned()).collect();
 
@@ -263,15 +263,15 @@ impl<T> Namespaced<T> {
                 continue;
             }
             let (k, v) = s.split_once('=').unwrap();
-            let parameter = Parameter::deserialize(&v)?;
+            let parameter = Parameter::deserialize(v);
             parameters.insert(k.to_owned(), parameter);
         }
 
-        Ok(Namespaced {
+        Namespaced {
             name,
             parameters,
             _marker: std::marker::PhantomData,
-        })
+        }
     }
 }
 impl Namespaced<Repr> {
@@ -878,7 +878,7 @@ where
                 }
                 "values" => {
                     if let Some((field, field_target)) = field_target.strip_one_field() {
-                        self.get(&K::from_value(Parameter::deserialize(field).unwrap()).unwrap())
+                        self.get(&K::from_value(Parameter::deserialize(field)).unwrap())
                             .unwrap()
                             .repr_default(field_target)
                     } else {
@@ -900,7 +900,7 @@ where
                                 .iter()
                                 .map(|(k, _v)| {
                                     (
-                                        format!("{}", k.get_self(ActionTarget::This).serialize()),
+                                        k.get_self(ActionTarget::This).serialize(),
                                         Parameter::Namespaced(k.repr_default(ActionTarget::This)),
                                     )
                                 })
@@ -916,7 +916,7 @@ where
                                 .iter()
                                 .map(|(k, v)| {
                                     (
-                                        format!("{}", k.get_self(ActionTarget::This).serialize()),
+                                        k.get_self(ActionTarget::This).serialize(),
                                         Parameter::Namespaced(v.repr_default(ActionTarget::This)),
                                     )
                                 })
@@ -939,7 +939,7 @@ where
                     if let Some((field, field_target)) = field_target.strip_one_field() {
                         let (mut k, v) = self
                             .remove_entry(
-                                &K::from_value(Parameter::deserialize(field).unwrap()).unwrap(),
+                                &K::from_value(Parameter::deserialize(field)).unwrap(),
                             )
                             .unwrap();
                         k.accept(field_target, value);
@@ -952,7 +952,7 @@ where
                 "values" => {
                     if let Some((field, field_target)) = field_target.strip_one_field() {
                         self.get_mut(
-                            &K::from_value(Parameter::deserialize(field).unwrap()).unwrap(),
+                            &K::from_value(Parameter::deserialize(field)).unwrap(),
                         )
                         .unwrap()
                         .accept(field_target, value)
@@ -977,7 +977,7 @@ where
 
     fn get_self(&self, target: ActionTarget) -> Parameter<Value> {
         if let Some((field, field_target)) = target.strip_one_field() {
-            self.get(&K::from_value(Parameter::deserialize(field).unwrap()).unwrap())
+            self.get(&K::from_value(Parameter::deserialize(field)).unwrap())
                 .unwrap()
                 .get_self(field_target)
         } else {
@@ -992,7 +992,7 @@ where
                                 .iter()
                                 .map(|(k, _v)| {
                                     let val = k.get_self(ActionTarget::This);
-                                    (format!("{}", val.serialize()), val)
+                                    (val.serialize(), val)
                                 })
                                 .collect(),
                             _marker: std::marker::PhantomData,
@@ -1006,7 +1006,7 @@ where
                                 .iter()
                                 .map(|(k, v)| {
                                     (
-                                        format!("{}", k.get_self(ActionTarget::This).serialize()),
+                                        k.get_self(ActionTarget::This).serialize(),
                                         v.get_self(ActionTarget::This),
                                     )
                                 })
