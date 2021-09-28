@@ -68,17 +68,21 @@ pub enum BuiltinRepr {
     ///
     /// Maps to `livemod:bool`
     Bool,
-    /// A string
+    /// A strin
     ///
     /// Maps to `livemod:string`
     String { multiline: bool },
 }
 
+/// Marker type to specify a representation parameter
 #[derive(Clone, Copy, Debug)]
 pub struct Repr;
+
+/// Marker type to specify a value parameter
 #[derive(Clone, Copy, Debug)]
 pub struct Value;
 
+/// A value in the LiveMod message transfer system
 #[derive(Clone, Debug)]
 pub enum Parameter<T> {
     SignedInt(i64),
@@ -212,6 +216,11 @@ impl<T> Parameter<T> {
     }
 }
 
+/// A namespaced value in the LiveMod message transfer system
+///
+/// This consists of a namespace, a name, and a set of labelled parameters encoding information for the type.
+/// Namespaces should start with the crate name which defines the type, and all parts of a namespaced name
+/// must only contain characters valid in a rust crate name ([A-Za-z_\-])
 #[derive(Clone, Debug)]
 pub struct Namespaced<T> {
     pub name: Vec<String>,
@@ -274,6 +283,7 @@ impl<T> Namespaced<T> {
         }
     }
 }
+
 impl Namespaced<Repr> {
     pub fn basic_structure_repr(
         name: &str,
@@ -482,16 +492,24 @@ impl ActionTarget<'_, '_> {
     }
 }
 
-/// Data which can be registered with a [`LiveModHandle`]
+/// Data which can be modified by the LiveMod API
 pub trait LiveMod: Send {
-    /// The default representation of the data
+    /// The default representation of the data.
+    ///
+    /// The representation of the data may be dependent on the current value of `self`.
     fn repr_default(&self, target: ActionTarget) -> Namespaced<Repr>;
-    /// Return the current value of this data, whether it is a struct or a value
+
+    /// Get the current value of `self` in the LiveMod message format.
     fn get_self(&self, target: ActionTarget) -> Parameter<Value>;
+
     /// Update this data with the given value
     fn accept(&mut self, target: ActionTarget, value: Parameter<Value>) -> bool;
 }
 
+/// Data which provides extra guarantees about its representation.
+///
+/// Types implementing `LiveModCtor` must have a sane representation which doesn't depend on its current value. Additionally,
+/// It must be possible to construct it directly from the LiveMod message format.
 pub trait LiveModCtor: LiveMod {
     fn repr_static() -> Namespaced<Repr>;
     fn from_value(value: Parameter<Value>) -> Option<Self>
@@ -499,6 +517,7 @@ pub trait LiveModCtor: LiveMod {
         Self: Sized;
 }
 
+/// Provider of an alternate representation for a LiveMod type
 pub trait LiveModRepr<T> {
     fn repr(&self, cur: &T) -> Namespaced<Repr>;
 }
