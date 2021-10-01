@@ -384,7 +384,7 @@ fn output_thread(
 
                     let mut value = vec![0u8; len];
                     reader.read_exact(&mut value).unwrap();
-                    Parameter::deserialize(std::str::from_utf8(&value).unwrap())
+                    Parameter::deserialize(&mut value.into_iter()).unwrap()
                 };
 
                 // Get the 'base' variable from our HashMap

@@ -1,9 +1,12 @@
 //! # livemod - Runtime modification of program parameters
 
 use std::array::IntoIter;
+use std::error::Error;
+use std::fmt::Display;
 use std::hash::Hash;
 use std::iter::FromIterator;
 use std::ops::RangeInclusive;
+use std::string::FromUtf8Error;
 
 pub use hashlink;
 use hashlink::LinkedHashMap;
@@ -74,6 +77,40 @@ pub enum BuiltinRepr {
     String { multiline: bool },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeserializeError {
+    UnexpectedEOF,
+    UnexpectedTerminator { previous: String },
+    InvalidParameter(u8),
+    NonUTF8(FromUtf8Error),
+}
+
+impl From<FromUtf8Error> for DeserializeError {
+    fn from(v: FromUtf8Error) -> Self {
+        Self::NonUTF8(v)
+    }
+}
+
+impl Display for DeserializeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DeserializeError::UnexpectedEOF => write!(f, "Unexpected end-of-file"),
+            DeserializeError::UnexpectedTerminator { previous } => write!(f, "Unexpected terminator in middle of {}", previous),
+            DeserializeError::InvalidParameter(b) => write!(f, "Invalid parameter type: {}", *b as char),
+            DeserializeError::NonUTF8(_) => write!(f, "Expected UTF-8"),
+        }
+    }
+}
+
+impl Error for DeserializeError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            DeserializeError::NonUTF8(e) => Some(e),
+            _ => None
+        }
+    }
+}
+
 /// Marker type to specify a representation parameter
 #[derive(Clone, Copy, Debug)]
 pub struct Repr;
@@ -96,27 +133,44 @@ pub enum Parameter<T> {
 impl<T> Parameter<T> {
     pub fn serialize(&self) -> String {
         match self {
-            Parameter::SignedInt(i) => format!("{:+}", i),
-            Parameter::UnsignedInt(i) => format!("{}", i),
+            Parameter::SignedInt(i) => format!("i{}", i),
+            Parameter::UnsignedInt(i) => format!("u{}", i),
             Parameter::Float(f) => format!("d{}", f),
             Parameter::Bool(true) => "t".to_owned(),
             Parameter::Bool(false) => "f".to_owned(),
-            Parameter::String(s) => format!("\"{}\"", s),
-            Parameter::Namespaced(n) => n.serialize(),
+            Parameter::String(s) => format!("s{}-{}", s.as_bytes().len(), s),
+            Parameter::Namespaced(n) => format!("n{}", n.serialize()),
         }
     }
 
-    pub fn deserialize(s: &str) -> Parameter<T> {
-        //TODO: Should it be a result?
-        match s.bytes().next().unwrap() {
-            b'-' | b'+' => Parameter::SignedInt(s.parse().unwrap()),
-            b'd' => Parameter::Float(s[1..].parse().unwrap()),
-            c if c.is_ascii_digit() => Parameter::UnsignedInt(s.parse().unwrap()),
-            b't' => Parameter::Bool(true),
-            b'f' => Parameter::Bool(false),
-            b'\"' => Parameter::String(s[1..s.len() - 1].to_owned()),
-            _ => Parameter::Namespaced(Namespaced::deserialize(s)),
-        }
+    pub fn deserialize(mut s: &mut dyn Iterator<Item = u8>) -> Result<Parameter<T>, DeserializeError> {
+        Ok(match s.next().unwrap() {
+            // Terminating ';' consumed by take_while
+            b'i' => Parameter::SignedInt(s.take_while(|b| b.is_ascii_digit() || *b == b'-').map(|b| b as char).collect::<String>().parse().unwrap()),
+            b'd' => Parameter::Float(s.take_while(|b| b.is_ascii_digit() || *b == b'-' || *b == b'.').map(|b| b as char).collect::<String>().parse().unwrap()),
+            b'u' => Parameter::UnsignedInt(s.take_while(|b| b.is_ascii_digit() || *b == b'-').map(|b| b as char).collect::<String>().parse().unwrap()),
+            b't' => {
+                s.next(); // consume the terminating `;`
+                Parameter::Bool(true)
+            },
+            b'f' => {
+                s.next(); // consume the terminating `;`
+                Parameter::Bool(false)
+            },
+            b's' => {
+                let len = (&mut s).take_while(|b| b.is_ascii_digit()).map(|b| b as char).collect::<String>().parse().unwrap();
+                // take_while will have consumed the separator `-`
+                let string = String::from_utf8(s.take(len).collect())?;
+                s.next(); // consume the terminating `;`
+                Parameter::String(string)
+            }
+            b'n' => {
+                let namespaced = Namespaced::deserialize(s)?;
+                s.next(); // consume the terminating `;`
+                Parameter::Namespaced(namespaced)
+            },
+            b => return Err(DeserializeError::InvalidParameter(b)),
+        })
     }
 
     pub fn try_into_signed_int(self) -> Result<i64, Self> {
@@ -244,43 +298,60 @@ impl<T> Namespaced<T> {
             s.push_str(k);
             s.push('=');
             s.push_str(&v.serialize());
-            s.push(',');
+            s.push(';');
         }
         s.push('}');
         s
     }
 
-    pub fn deserialize(s: &str) -> Namespaced<T> {
-        let (name, params) = s.split_once('{').unwrap(); // Rust 1.52... Should I support earlier?
-        let name = name.split(':').map(|s| s.trim().to_owned()).collect();
+    pub fn deserialize(mut s: &mut dyn Iterator<Item = u8>) -> Result<Namespaced<T>, DeserializeError> {
+        let name = {
+            let mut name = Vec::new();
+            loop {
+                let b = s.next();
+                match b {
+                    Some(b'{') => break,
+                    Some(b) => name.push(b),
+                    None => return Err(DeserializeError::UnexpectedEOF),
+                }
+            }
+            //TODO: Name could allow internal colons?
+            String::from_utf8(name)?.split(':').map(|s| s.trim().to_owned()).collect()
+        };
 
         let mut parameters = LinkedHashMap::new();
-        let mut nested_level = 0;
-        for s in params[..params.len() - 1].split(|c| match c {
-            '{' => {
-                nested_level += 1;
-                false
-            }
-            '}' => {
-                nested_level -= 1;
-                false
-            }
-            ',' if nested_level == 0 => true,
-            _ => false,
-        }) {
-            if s.is_empty() {
-                continue;
-            }
-            let (k, v) = s.split_once('=').unwrap();
-            let parameter = Parameter::deserialize(v);
-            parameters.insert(k.to_owned(), parameter);
+        loop {
+            let key = {
+                let mut key = match s.next() {
+                    Some(b'}') => break,
+                    Some(b) => {
+                        let mut key = Vec::new();
+                        key.push(b);
+                        key
+                    },
+                    None => return Err(DeserializeError::UnexpectedEOF),
+                };
+                loop {
+                    let b = s.next();
+                    match b {
+                        Some(b'}') => return Err(DeserializeError::UnexpectedTerminator { previous: String::from_utf8_lossy(&key).into_owned() }),
+                        Some(b'=') => break,
+                        Some(b) => key.push(b),
+                        None => return Err(DeserializeError::UnexpectedEOF),
+                    }
+                }
+                String::from_utf8(key)?
+            };
+
+            let parameter = Parameter::deserialize(&mut s)?;
+            parameters.insert(key, parameter);
         }
 
-        Namespaced {
+        Ok(Namespaced {
             name,
             parameters,
             _marker: std::marker::PhantomData,
-        }
+        })
     }
 }
 
@@ -897,7 +968,7 @@ where
                 }
                 "values" => {
                     if let Some((field, field_target)) = field_target.strip_one_field() {
-                        self.get(&K::from_value(Parameter::deserialize(field)).unwrap())
+                        self.get(&K::from_value(Parameter::deserialize(&mut field.bytes()).unwrap()).unwrap())
                             .unwrap()
                             .repr_default(field_target)
                     } else {
@@ -958,7 +1029,7 @@ where
                     if let Some((field, field_target)) = field_target.strip_one_field() {
                         let (mut k, v) = self
                             .remove_entry(
-                                &K::from_value(Parameter::deserialize(field)).unwrap(),
+                                &K::from_value(Parameter::deserialize(&mut field.bytes()).unwrap()).unwrap(),
                             )
                             .unwrap();
                         k.accept(field_target, value);
@@ -971,7 +1042,7 @@ where
                 "values" => {
                     if let Some((field, field_target)) = field_target.strip_one_field() {
                         self.get_mut(
-                            &K::from_value(Parameter::deserialize(field)).unwrap(),
+                            &K::from_value(Parameter::deserialize(&mut field.bytes()).unwrap()).unwrap(),
                         )
                         .unwrap()
                         .accept(field_target, value)
@@ -996,7 +1067,7 @@ where
 
     fn get_self(&self, target: ActionTarget) -> Parameter<Value> {
         if let Some((field, field_target)) = target.strip_one_field() {
-            self.get(&K::from_value(Parameter::deserialize(field)).unwrap())
+            self.get(&K::from_value(Parameter::deserialize(&mut field.bytes()).unwrap()).unwrap())
                 .unwrap()
                 .get_self(field_target)
         } else {

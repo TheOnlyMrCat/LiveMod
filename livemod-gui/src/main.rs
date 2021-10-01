@@ -769,7 +769,7 @@ fn reader_thread(sender: Sender<Message>) {
                 let repr = {
                     let mut repr = vec![0u8; len_repr];
                     reader.read_exact(&mut repr).unwrap();
-                    Namespaced::deserialize(std::str::from_utf8(&repr).unwrap())
+                    Namespaced::deserialize(&mut repr.into_iter()).unwrap()
                 };
                 reader.fill_buf().unwrap();
                 reader.consume(1); // Consume ';' delimiter
@@ -783,7 +783,7 @@ fn reader_thread(sender: Sender<Message>) {
                 let value = {
                     let mut value = vec![0u8; len_value];
                     reader.read_exact(&mut value).unwrap();
-                    Parameter::deserialize(std::str::from_utf8(&value).unwrap())
+                    Parameter::deserialize(&mut value.into_iter()).unwrap()
                 };
                 sender.send(Message::NewData(name, repr, value)).unwrap();
             }
@@ -804,7 +804,7 @@ fn reader_thread(sender: Sender<Message>) {
                 let value = {
                     let mut value = vec![0u8; len_value];
                     reader.read_exact(&mut value).unwrap();
-                    Parameter::deserialize(std::str::from_utf8(&value).unwrap())
+                    Parameter::deserialize(&mut value.into_iter()).unwrap()
                 };
                 sender.send(Message::UpdateData(name, value)).unwrap();
             }
@@ -825,7 +825,7 @@ fn reader_thread(sender: Sender<Message>) {
                 let repr = {
                     let mut repr = vec![0u8; len_repr];
                     reader.read_exact(&mut repr).unwrap();
-                    Namespaced::deserialize(std::str::from_utf8(&repr).unwrap())
+                    Namespaced::deserialize(&mut repr.into_iter()).unwrap()
                 };
                 reader.fill_buf().unwrap();
                 reader.consume(1); // Consume ';' delimiter
@@ -839,7 +839,7 @@ fn reader_thread(sender: Sender<Message>) {
                 let value = {
                     let mut value = vec![0u8; len_value];
                     reader.read_exact(&mut value).unwrap();
-                    Parameter::deserialize(std::str::from_utf8(&value).unwrap())
+                    Parameter::deserialize(&mut value.into_iter()).unwrap()
                 };
                 sender.send(Message::UpdateRepr(name, repr, value)).unwrap();
             }
